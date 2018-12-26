@@ -43,8 +43,8 @@ static const int CADDR_TIME_VERSION = 31402;
 static const int NOBLKS_VERSION_START = 60002;
 static const int NOBLKS_VERSION_END = 60006;
 
-#define DISPLAY_VERSION_MAJOR       0
+#define DISPLAY_VERSION_MAJOR       1
 #define DISPLAY_VERSION_MINOR       0
-#define DISPLAY_VERSION_REVISION    9
+#define DISPLAY_VERSION_REVISION    0
 
 #endif
