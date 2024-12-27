@@ -11,7 +11,10 @@ src/build.h
 .42
 #compilation and Qt preprocessor part
 *.qm
+build
+debug
 Makefile
+!src/leveldb/Makefile
 42-qt
 #resources cpp
 qrc_*.cpp
@@ -19,7 +22,5 @@ qrc_*.cpp
 *.pro.user
 #mac specific
 .DS_Store
-build
-Thumbs.db
 
-!src/leveldb/Makefile
+Thumbs.db
