@@ -63,9 +63,9 @@ void OptionsModel::Init()
         if(fTestNet)
             settings.setValue("strThirdPartyTxUrls", "");
         else
-            settings.setValue("strThirdPartyTxUrls", "https://chainz.cryptoid.info/42/tx.dws?%s");
+            settings.setValue("strThirdPartyTxUrls", "https://explorer.42-coin.org/tx/%s|https://chainz.cryptoid.info/42/tx.dws?%s");
     }
-    strThirdPartyTxUrls = settings.value("strThirdPartyTxUrls", "https://chainz.cryptoid.info/42/tx.dws?%s").toString();
+    strThirdPartyTxUrls = settings.value("strThirdPartyTxUrls", "https://explorer.42-coin.org/tx/%s|https://chainz.cryptoid.info/42/tx.dws?%s").toString();
     fMinimizeToTray = settings.value("fMinimizeToTray", false).toBool();
     fMinimizeOnClose = settings.value("fMinimizeOnClose", false).toBool();
     fCoinControlFeatures = settings.value("fCoinControlFeatures", false).toBool();
