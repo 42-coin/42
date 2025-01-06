@@ -1,6 +1,6 @@
 TEMPLATE = app
 TARGET = 42-qt
-VERSION = 0.11.1
+VERSION = 0.11.2
 INCLUDEPATH += src src/json src/qt
 QT += core gui network
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
