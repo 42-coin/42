@@ -89,6 +89,7 @@ void Shutdown(void* parg)
         nTransactionsUpdated++;
 //        CTxDB().Close();
         bitdb.Flush(false);
+        StopRPCServer();
         StopNode();
         bitdb.Flush(true);
         boost::filesystem::remove(GetPidFile());
@@ -1005,7 +1006,7 @@ bool AppInit2()
         InitError(_("Error: could not start node"));
 
     if (fServer)
-        NewThread(ThreadRPCServer, NULL);
+        StartRPCServer();
 
     // ********************************************************* Step 13: IP collection thread
     strCollectorCommand = GetArg("-peercollector", "");
