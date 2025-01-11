@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
-// Copyright (c) 2013-2016 The NovaCoin developers
+// Copyright (c) 2013-2022 The NovaCoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -102,12 +102,12 @@ public:
 };
 
 // CreateNewBlock: create new block (without proof-of-work/with provided coinstake)
-CBlock* CreateNewBlock(CWallet* pwallet, CTransaction *txCoinStake)
+std::shared_ptr<CBlock> CreateNewBlock(CWallet* pwallet, CTransaction *txCoinStake)
 {
     bool fProofOfStake = txCoinStake != NULL;
 
     // Create new block
-    auto_ptr<CBlock> pblock(new CBlock());
+    shared_ptr<CBlock> pblock(new CBlock());
     if (!pblock.get())
         return NULL;
 
@@ -380,11 +380,11 @@ CBlock* CreateNewBlock(CWallet* pwallet, CTransaction *txCoinStake)
         pblock->nNonce         = 0;
     }
 
-    return pblock.release();
+    return pblock;
 }
 
 
-void IncrementExtraNonce(CBlock* pblock, CBlockIndex* pindexPrev, unsigned int& nExtraNonce)
+void IncrementExtraNonce(shared_ptr<CBlock>& pblock, CBlockIndex* pindexPrev, unsigned int& nExtraNonce)
 {
     // Update nExtraNonce
     static uint256 hashPrevBlock;
@@ -403,7 +403,7 @@ void IncrementExtraNonce(CBlock* pblock, CBlockIndex* pindexPrev, unsigned int& 
 }
 
 
-void FormatHashBuffers(CBlock* pblock, char* pmidstate, char* pdata, char* phash1)
+void FormatHashBuffers(const shared_ptr<CBlock>& pblock, char* pmidstate, char* pdata, char* phash1)
 {
     //
     // Pre-build hash buffers
@@ -449,7 +449,7 @@ void FormatHashBuffers(CBlock* pblock, char* pmidstate, char* pdata, char* phash
 }
 
 
-bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
+bool CheckWork(const std::shared_ptr<CBlock>& pblock, CWallet& wallet, CReserveKey& reservekey)
 {
     uint256 hashBlock = pblock->GetHash();
     uint256 hashTarget = CBigNum().SetCompact(pblock->nBits).getuint256();
@@ -481,14 +481,14 @@ bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
         }
 
         // Process this block the same as if we had received it from another node
-        if (!ProcessBlock(NULL, pblock))
+        if (!ProcessBlock(NULL, pblock.get()))
             return error("CheckWork() : ProcessBlock, block not accepted");
     }
 
     return true;
 }
 
-bool CheckStake(CBlock* pblock, CWallet& wallet)
+bool CheckStake(const std::shared_ptr<CBlock>& pblock, CWallet& wallet)
 {
     uint256 proofHash = 0, hashTarget = 0;
     uint256 hashBlock = pblock->GetHash();
@@ -518,7 +518,7 @@ bool CheckStake(CBlock* pblock, CWallet& wallet)
         }
 
         // Process this block the same as if we had received it from another node
-        if (!ProcessBlock(NULL, pblock))
+        if (!ProcessBlock(NULL, pblock.get()))
             return error("CheckStake() : ProcessBlock, block not accepted");
     }
 
@@ -728,8 +728,7 @@ void ThreadStakeMiner(void* parg)
                 }
 
                 // Now we have new coinstake, it's time to create the block ...
-                CBlock* pblock;
-                pblock = CreateNewBlock(pwallet, &txCoinStake);
+                std::shared_ptr<CBlock> pblock = CreateNewBlock(pwallet, &txCoinStake);
                 if (!pblock)
                 {
                     string strMessage("Warning: Unable to allocate memory for the new block object. Mining thread has been stopped.");
