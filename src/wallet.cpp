@@ -2189,7 +2189,7 @@ bool CWallet::MergeCoins(const int64_t& nAmount, const int64_t& nMinValue, const
         int64_t nBytes = ::GetSerializeSize(*(CTransaction*)&wtxNew, SER_NETWORK, PROTOCOL_VERSION) + wtxNew.vin.size() * 110;
         dWeight += (double)nCredit * pcoin.first->GetDepthInMainChain();
 
-        double dFinalPriority = dWeight /= nBytes;
+        double dFinalPriority = dWeight / nBytes;
         bool fAllowFree = CTransaction::AllowFree(dFinalPriority);
 
         // Get actual transaction fee according to its estimated size and priority
