@@ -16,6 +16,7 @@
 #endif
 #include <QScrollBar>
 #include <QStringList>
+#include <QAbstractItemView>
 
 #include <openssl/crypto.h>
 #include <db_cxx.h>
@@ -249,9 +250,8 @@ bool RPCConsole::eventFilter(QObject* obj, QEvent *event)
         case Qt::Key_Return:
         case Qt::Key_Enter:
             // forward these events to lineEdit
-            if(obj == autoCompleter->popup()) {
+            if(obj == (QObject*)autoCompleter->popup()) {
                 QApplication::postEvent(ui->lineEdit, new QKeyEvent(*keyevt));
-				autoCompleter->popup()->hide();
                 return true;
             }
             break;
@@ -265,6 +265,7 @@ bool RPCConsole::eventFilter(QObject* obj, QEvent *event)
             {
                 ui->lineEdit->setFocus();
                 QApplication::postEvent(ui->lineEdit, new QKeyEvent(*keyevt));
+                autoCompleter->popup()->hide();
                 return true;
             }
         }
@@ -306,7 +307,9 @@ void RPCConsole::setClientModel(ClientModel *model)
 
 		wordList.sort();
         autoCompleter = new QCompleter(wordList, this);
-		autoCompleter->setModelSorting(QCompleter::CaseSensitivelySortedModel);
+        autoCompleter->setModelSorting(QCompleter::CaseSensitivelySortedModel);
+        // ui->lineEdit is initially disabled because running commands is only
+        // possible from now on.
         ui->lineEdit->setEnabled(true);
         ui->lineEdit->setCompleter(autoCompleter);
         autoCompleter->popup()->installEventFilter(this);
