@@ -1,4 +1,12 @@
-#!/bin/sh
+#!/bin/bash
+
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
+PREVDIR=$(pwd)
+SCRIPT=$(realpath $0)
+SCRIPTPATH=`dirname $SCRIPT`
 
 if [ $# -gt 0 ]; then
     FILE="$1"
@@ -11,12 +19,14 @@ else
     exit 1
 fi
 
+cd $SCRIPTPATH
+
 if [ -e "$(which git)" ]; then
     # clean 'dirty' status of touched files that haven't been modified
     git diff >/dev/null 2>/dev/null 
 
-    # get a string like "v0.6.0-66-g59887e8-dirty"
-    DESC="$(git describe --dirty 2>/dev/null)"
+    # get a string like "v0.6.0-66-g59887e8"
+    DESC="$(git describe 2>/dev/null)"
 
     # get a string like "2012-04-10 16:27:19 +0200"
     TIME="$(git log -n 1 --format="%ci")"
@@ -33,3 +43,5 @@ if [ "$INFO" != "$NEWINFO" ]; then
     echo "$NEWINFO" >"$FILE"
     echo "#define BUILD_DATE \"$TIME\"" >>"$FILE"
 fi
+
+cd $PREVDIR
