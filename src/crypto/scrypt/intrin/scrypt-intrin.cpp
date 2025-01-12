@@ -27,8 +27,15 @@
  * online backup system.
  */
 
+#ifdef __ARM_NEON
+#include <sse2neon.h>
+#else
 #include <emmintrin.h>
+#endif
+
 #include "scrypt.h"
+
+#include <openssl/evp.h>
 
 static inline uint32_t le32dec(const void *pp)
 {
