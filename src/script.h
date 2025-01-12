@@ -5,14 +5,13 @@
 #ifndef H_BITCOIN_SCRIPT
 #define H_BITCOIN_SCRIPT
 
+#include "keystore.h"
+#include "bignum.h"
+#include "util.h"
+
 #include <string>
 #include <vector>
 
-#include <boost/foreach.hpp>
-
-#include "keystore.h"
-#include "bignum.h"
-#include "base58.h"
 
 typedef std::vector<uint8_t> valtype;
 
@@ -269,7 +268,7 @@ inline std::string ValueString(const std::vector<unsigned char>& vch)
 inline std::string StackString(const std::vector<std::vector<unsigned char> >& vStack)
 {
     std::string str;
-    BOOST_FOREACH(const std::vector<unsigned char>& vch, vStack)
+    for (const std::vector<unsigned char>& vch : vStack)
     {
         if (!str.empty())
             str += " ";
@@ -319,8 +318,8 @@ public:
 #endif
 
     CScript& operator=(const CScript&) = default;
-	
-	CScript& operator+=(const CScript& b)
+
+    CScript& operator+=(const CScript& b)
     {
         insert(end(), b.begin(), b.end());
         return *this;
@@ -624,10 +623,7 @@ public:
         printf("%s\n", ToString().c_str());
     }
 
-    CScriptID GetID() const
-    {
-        return CScriptID(Hash160(*this));
-    }
+    CScriptID GetID() const;
 };
 
 bool IsCanonicalPubKey(const std::vector<unsigned char> &vchPubKey, unsigned int flags);
