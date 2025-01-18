@@ -5,7 +5,7 @@
 
 
 static CCriticalSection cs_nTimeOffset;
-static uint32_t 42COIN_TIMEDATA_MAX_SAMPLES = 200;
+static uint32_t TIMEDATA_MAX_SAMPLES = 200;
 
 // Trusted NTP offset or median of NTP samples.
 extern int64_t nNtpOffset;
@@ -53,13 +53,13 @@ void AddTimeData(const CNetAddr& ip, int64_t nTime)
     LOCK(cs_nTimeOffset);
     // Ignore duplicates
     static std::set<CNetAddr> setKnown;
-    if (setKnown.size() == NOVACOIN_TIMEDATA_MAX_SAMPLES)
+    if (setKnown.size() == TIMEDATA_MAX_SAMPLES)
         return;
     if (!setKnown.insert(ip).second)
         return;
 
     // Add data
-    static CMedianFilter<int64_t> vTimeOffsets(NOVACOIN_TIMEDATA_MAX_SAMPLES,0);
+    static CMedianFilter<int64_t> vTimeOffsets(TIMEDATA_MAX_SAMPLES,0);
     vTimeOffsets.input(nOffsetSample);
     printf("Added time data, samples %d, offset %+" PRId64 " (%+" PRId64 " minutes)\n", vTimeOffsets.size(), nOffsetSample, nOffsetSample/60);
     if (vTimeOffsets.size() >= 5 && vTimeOffsets.size() % 2 == 1)
@@ -88,10 +88,10 @@ void AddTimeData(const CNetAddr& ip, int64_t nTime)
                 if (!fMatch)
                 {
                     fDone = true;
-                    std::string strMessage = _("Warning: Please check that your computer's date and time are correct! If your clock is wrong NovaCoin will not work properly.");
+                    std::string strMessage = _("Warning: Please check that your computer's date and time are correct! If your clock is wrong 42 will not work properly.");
                     strMiscWarning = strMessage;
                     printf("*** %s\n", strMessage.c_str());
-                    uiInterface.ThreadSafeMessageBox(strMessage+" ", std::string("NovaCoin"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION);
+                    uiInterface.ThreadSafeMessageBox(strMessage+" ", std::string("42"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION);
                 }
             }
         }

@@ -10,6 +10,7 @@
 #include "optionsmodel.h"
 #include "coincontrol.h"
 #include "dialogwindowflags.h"
+#include "wallet.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -458,7 +459,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QWidget* dialog)
     coinControl->ListSelected(vCoinControl);
     model->getOutputs(vCoinControl, vOutputs);
 
-    BOOST_FOREACH(const COutput& out, vOutputs)
+    for (const COutput& out : vOutputs)
     {
         // Quantity
         nQuantity++;
@@ -573,8 +574,6 @@ void CoinControlDialog::updateLabels(WalletModel *model, QWidget* dialog)
 
 void CoinControlDialog::updateView()
 {
-    if (!model || !model->getOptionsModel() || !model->getAddressTableModel())
-        return;
     bool treeMode = ui->radioTreeMode->isChecked();
 
     ui->treeWidget->clear();
@@ -582,18 +581,21 @@ void CoinControlDialog::updateView()
     QFlags<Qt::ItemFlag> flgCheckbox=Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable;
     QFlags<Qt::ItemFlag> flgTristate=Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsTristate;    
 
-    int nDisplayUnit = model->getOptionsModel()->getDisplayUnit();
+    int nDisplayUnit = BitcoinUnits::BTC;
+    if (model && model->getOptionsModel())
+        nDisplayUnit = model->getOptionsModel()->getDisplayUnit();
 
     map<QString, vector<COutput> > mapCoins;
     model->listCoins(mapCoins);
 
-    BOOST_FOREACH(PAIRTYPE(QString, vector<COutput>) coins, mapCoins)
+    for (auto coins : mapCoins)
     {
         QTreeWidgetItem *itemWalletAddress = new QTreeWidgetItem();
-        itemWalletAddress->setCheckState(COLUMN_CHECKBOX, Qt::Unchecked);
         QString sWalletAddress = coins.first;
-        QString sWalletLabel = model->getAddressTableModel()->labelForAddress(sWalletAddress);
-        if (sWalletLabel.isEmpty())
+        QString sWalletLabel = "";
+        if (model->getAddressTableModel())
+            sWalletLabel = model->getAddressTableModel()->labelForAddress(sWalletAddress);
+        if (sWalletLabel.length() == 0)
             sWalletLabel = tr("(no label)");
 
         if (treeMode)
@@ -619,7 +621,7 @@ void CoinControlDialog::updateView()
         int nChildren = 0;
         int nInputSum = 0;
         uint64_t nTxWeight = 0, nTxWeightSum = 0;
-        BOOST_FOREACH(const COutput& out, coins.second)
+        for (const COutput& out : coins.second)
         {
             int nInputSize = 148; // 180 if uncompressed public key
             nSum += out.tx->vout[out.i].nValue;
@@ -663,8 +665,10 @@ void CoinControlDialog::updateView()
             }
             else if (!treeMode)
             {
-                QString sLabel = model->getAddressTableModel()->labelForAddress(sAddress);
-                if (sLabel.isEmpty())
+                QString sLabel = "";
+                if (model->getAddressTableModel())
+                    sLabel = model->getAddressTableModel()->labelForAddress(sAddress);
+                if (sLabel.length() == 0)
                     sLabel = tr("(no label)");
                 itemOutput->setText(COLUMN_LABEL, sLabel); 
             }

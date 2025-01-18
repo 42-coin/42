@@ -4,10 +4,11 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "db.h"
-#include "net.h"
 #include "util.h"
-#include "main.h"
-#include "ui_interface.h"
+#include "addrman.h"
+#include "random.h"
+#include "hash.h"
+
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 
@@ -16,7 +17,6 @@
 #endif
 
 using namespace std;
-using namespace boost;
 
 
 unsigned int nWalletDBUpdated;
@@ -42,7 +42,7 @@ void CDBEnv::EnvShutdown()
         DbEnv(0u).remove(strPath.c_str(), 0);
 }
 
-CDBEnv::CDBEnv() : fDetachDB(false), fDbEnvInit(false), fMockDb(false), dbenv(DB_CXX_NO_EXCEPTIONS) { }
+CDBEnv::CDBEnv() : fDbEnvInit(false), fMockDb(false), dbenv(DB_CXX_NO_EXCEPTIONS) { }
 
 CDBEnv::~CDBEnv()
 {
@@ -106,31 +106,6 @@ bool CDBEnv::Open(boost::filesystem::path pathEnv_)
 
     fDbEnvInit = true;
     fMockDb = false;
-
-#ifndef USE_LEVELDB
-    // Check that the number of locks is sufficient (to prevent chain fork possibility, read http://bitcoin.org/may15 for more info)
-    u_int32_t nMaxLocks;
-    if (!dbenv.get_lk_max_locks(&nMaxLocks))
-    {
-        int nBlocks, nDeepReorg;
-        std::string strMessage;
-
-        nBlocks = nMaxLocks / 48768;
-        nDeepReorg = (nBlocks - 1) / 2;
-
-        printf("Final lk_max_locks is %u, sufficient for (worst case) %d block%s in a single transaction (up to a %d-deep reorganization)\n", nMaxLocks, nBlocks, (nBlocks == 1) ? "" : "s", nDeepReorg);
-        if (nDeepReorg < 3)
-        {
-            if (nBlocks < 1)
-                strMessage = strprintf(_("Warning: DB_CONFIG has set_lk_max_locks %u, which may be too low for a single block. If this limit is reached, 42 may stop working."), nMaxLocks);
-            else
-                strMessage = strprintf(_("Warning: DB_CONFIG has set_lk_max_locks %u, which may be too low for a common blockchain reorganization. If this limit is reached, 42 may stop working."), nMaxLocks);
-
-            strMiscWarning = strMessage;
-            printf("*** %s\n", strMessage.c_str());
-        }
-    }
-#endif
 
     return true;
 }
@@ -305,14 +280,6 @@ CDB::CDB(const char *pszFile, const char* pszMode) :
     }
 }
 
-static bool IsChainFile(std::string strFile)
-{
-    if (strFile == "blkindex.dat")
-        return true;
-
-    return false;
-}
-
 void CDB::Close()
 {
     if (!pdb)
@@ -326,10 +293,6 @@ void CDB::Close()
     unsigned int nMinutes = 0;
     if (fReadOnly)
         nMinutes = 1;
-    if (IsChainFile(strFile))
-        nMinutes = 2;
-    if (IsChainFile(strFile) && IsInitialBlockDownload())
-        nMinutes = 5;
 
     bitdb.dbenv.txn_checkpoint(nMinutes ? GetArgUInt("-dblogsize", 100)*1024 : 0, nMinutes, 0);
 
@@ -485,11 +448,9 @@ void CDBEnv::Flush(bool fShutdown)
                 CloseDb(strFile);
                 printf("%s checkpoint\n", strFile.c_str());
                 dbenv.txn_checkpoint(0, 0, 0);
-                if (!IsChainFile(strFile) || fDetachDB) {
-                    printf("%s detach\n", strFile.c_str());
-                    if (!fMockDb)
-                        dbenv.lsn_reset(strFile.c_str(), 0);
-                }
+                printf("%s detach\n", strFile.c_str());
+                if (!fMockDb)
+                    dbenv.lsn_reset(strFile.c_str(), 0);
                 printf("%s closed\n", strFile.c_str());
                 mapFileUseCount.erase(mi++);
             }
@@ -514,6 +475,7 @@ void CDBEnv::Flush(bool fShutdown)
 // CAddrDB
 //
 
+unsigned char CAddrDB::pchMessageStart[4] = {};
 
 CAddrDB::CAddrDB()
 {
@@ -524,12 +486,12 @@ bool CAddrDB::Write(const CAddrMan& addr)
 {
     // Generate random temporary filename
     unsigned short randv = 0;
-    RAND_bytes((unsigned char *)&randv, sizeof(randv));
+    GetRandBytes((unsigned char *)&randv, sizeof(randv));
     std::string tmpfn = strprintf("peers.dat.%04x", randv);
 
     // serialize addresses, checksum data up to that point, then append csum
     CDataStream ssPeers(SER_DISK, CLIENT_VERSION);
-    ssPeers << FLATDATA(pchMessageStart);
+    ssPeers << FLATDATA(CAddrDB::pchMessageStart);
     ssPeers << addr;
     uint256 hash = Hash(ssPeers.begin(), ssPeers.end());
     ssPeers << hash;
@@ -594,11 +556,11 @@ bool CAddrDB::Read(CAddrMan& addr)
 
     unsigned char pchMsgTmp[4];
     try {
-        // de-serialize file header (pchMessageStart magic number) and
+        // de-serialize file header (CAddrDB::pchMessageStart magic number) and
         ssPeers >> FLATDATA(pchMsgTmp);
 
         // verify the network matches ours
-        if (memcmp(pchMsgTmp, pchMessageStart, sizeof(pchMsgTmp)))
+        if (memcmp(pchMsgTmp, CAddrDB::pchMessageStart, sizeof(pchMsgTmp)))
             return error("CAddrman::Read() : invalid network magic number");
 
         // de-serialize address data into one CAddrMan object

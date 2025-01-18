@@ -72,8 +72,10 @@ class CNetAddr
         std::vector<unsigned char> GetGroup() const;
         int GetReachabilityFrom(const CNetAddr *paddrPartner = NULL) const;
 
+#ifdef USE_IPV6
         CNetAddr(const struct in6_addr& pipv6Addr);
         bool GetIn6Addr(struct in6_addr* pipv6Addr) const;
+#endif
 
         friend bool operator==(const CNetAddr& a, const CNetAddr& b);
         friend bool operator!=(const CNetAddr& a, const CNetAddr& b);
@@ -113,8 +115,10 @@ class CService : public CNetAddr
         std::string ToStringPort() const;
         std::string ToStringIPPort() const;
 
+#ifdef USE_IPV6
         CService(const struct in6_addr& ipv6Addr, uint16_t port);
         CService(const struct sockaddr_in6& addr);
+#endif
 
         IMPLEMENT_SERIALIZE
             (
@@ -127,14 +131,14 @@ class CService : public CNetAddr
             )
 };
 
-typedef CService proxyType;
+typedef std::pair<CService, int> proxyType;
 
 enum Network ParseNetwork(std::string net);
 void SplitHostPort(std::string in, uint16_t &portOut, std::string &hostOut);
-bool SetProxy(enum Network net, CService addrProxy);
+bool SetProxy(enum Network net, CService addrProxy, int nSocksVersion = 5);
 bool GetProxy(enum Network net, proxyType &proxyInfoOut);
 bool IsProxy(const CNetAddr &addr);
-bool SetNameProxy(CService addrProxy);
+bool SetNameProxy(CService addrProxy, int nSocksVersion = 5);
 bool HaveNameProxy();
 bool LookupHost(const char *pszName, std::vector<CNetAddr>& vIP, unsigned int nMaxSolutions = 0, bool fAllowLookup = true);
 bool Lookup(const char *pszName, CService& addr, uint16_t portDefault = 0, bool fAllowLookup = true);
@@ -142,8 +146,6 @@ bool Lookup(const char *pszName, std::vector<CService>& vAddr, uint16_t portDefa
 bool LookupNumeric(const char *pszName, CService& addr, uint16_t portDefault = 0);
 bool ConnectSocket(const CService &addr, SOCKET& hSocketRet, int nTimeout = nConnectTimeout);
 bool ConnectSocketByName(CService &addr, SOCKET& hSocketRet, const char *pszDest, uint16_t portDefault = 0, int nTimeout = nConnectTimeout);
-/** Return readable error string for a network error code */
-std::string NetworkErrorString(int err);
 /** Close socket and set hSocket to INVALID_SOCKET */
 bool CloseSocket(SOCKET& hSocket);
 

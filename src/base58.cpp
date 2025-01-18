@@ -13,11 +13,8 @@
 // - Double-clicking selects the whole number as one word if it's all alphanumeric.
 //
 
-#include <string>
-#include <vector>
-#include "key.h"
-#include "script.h"
 #include "base58.h"
+#include "hash.h"
 
 static const std::array<char, 58> digits = {
     '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
@@ -25,6 +22,7 @@ static const std::array<char, 58> digits = {
     'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'm',
     'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
 };
+
 static const std::array<signed char, 128> characterMap = {
 	-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
 	-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
@@ -50,6 +48,7 @@ std::string EncodeBase58(const unsigned char* begin, const unsigned char* end)
     // Allocate enough space in big-endian base58 representation.
     auto base58Size = (end - begin) * 138 / 100 + 1; // log(256) / log(58), rounded up.
     std::vector<unsigned char> b58(base58Size);
+
     while (begin != end) {
         int carry = *begin;
         int i = 0;
@@ -61,7 +60,7 @@ std::string EncodeBase58(const unsigned char* begin, const unsigned char* end)
             carry /= 58;
         }
 
-           assert(carry == 0);
+        assert(carry == 0);
         length = i;
         begin += 1;
     }
@@ -95,8 +94,10 @@ bool DecodeBase58(const char* psz, std::vector<unsigned char>& vchRet)
 {
     const auto* it = psz;
     const char* end = it + strlen(psz);
+
     // Skip leading spaces.
     it = std::find_if_not(it, end, [](char c) { return std::isspace(c);});
+
     // Skip and count leading zeros.
     std::size_t zeroes = 0;
     std::size_t length = 0;
@@ -104,22 +105,25 @@ bool DecodeBase58(const char* psz, std::vector<unsigned char>& vchRet)
         zeroes += 1;
         it += 1;
     }
+
     // Allocate enough space in big-endian base256 representation.
     std::size_t base258Size = (end - it) * 733 / 1000 + 1; // log(58) / log(256), rounded up.
     std::vector<unsigned char> b256(base258Size);
+
     // Process the characters.
    while (it != end && !std::isspace(*it)) {
         if (static_cast<unsigned char>(*it) >= 128) {
             // Invalid b58 character
             return false;
         }
+
         // Decode base58 character
         int carry = characterMap[static_cast<unsigned char>(*it)];
         if (carry == -1) {
             // Invalid b58 character
             return false;
         }
-		
+
         std::size_t i = 0;
         for (auto b256it = b256.rbegin(); (carry != 0 || i < length) && (b256it != b256.rend());
              ++b256it, ++i) {
@@ -254,7 +258,7 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
 
     std::string CBase58Data::ToString() const
     {
-        std::vector<unsigned char> vch(1, nVersion);
+        std::vector<unsigned char> vch{nVersion};
         vch.insert(vch.end(), vchData.begin(), vchData.end());
         return EncodeBase58Check(vch);
     }
@@ -268,6 +272,20 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
         return 0;
     }
 
+    namespace {
+        class CBitcoinAddressVisitor {
+        private:
+            CBitcoinAddress *addr;
+        public:
+            explicit CBitcoinAddressVisitor(CBitcoinAddress *addrIn) : addr(addrIn) { }
+
+            bool operator()(const CKeyID &id) const { return addr->Set(id); }
+            bool operator()(const CScriptID &id) const { return addr->Set(id); }
+            bool operator()(const CMalleablePubKey &mpk) const { return addr->Set(mpk); }
+            bool operator()([[maybe_unused]] const CNoDestination &no) const { return false; }
+        };
+    } // namespace
+
     bool CBitcoinAddress::Set(const CKeyID &id) {
         SetData(fTestNet ? PUBKEY_ADDRESS_TEST : PUBKEY_ADDRESS, &id, 20);
         return true;
@@ -280,7 +298,7 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
 
     bool CBitcoinAddress::Set(const CTxDestination &dest)
     {
-        return boost::apply_visitor(CBitcoinAddressVisitor(this), dest);
+        return std::visit(CBitcoinAddressVisitor(this), dest);
     }
 
     bool CBitcoinAddress::Set(const CMalleablePubKey &mpk) {
@@ -340,7 +358,7 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
 
         if (fSeemsSane && !fSimple)
         {
-            // Perform dditional checking
+            // Perform additional checking
             //    for pubkey pair addresses
             CMalleablePubKey mpk;
             mpk.setvch(vchData);
@@ -478,5 +496,3 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
     {
         SetSecret(vchSecret, fCompressed);
     }
-
-

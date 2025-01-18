@@ -2,38 +2,41 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <map>
+#include "key.h"
+#include "base58.h"
+#include "streams.h"
+#include "hash.h"
 
 #include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 
-#include "key.h"
-#include "base58.h"
 
 // Generate a private key from just the secret parameter
 int EC_KEY_regenerate_key(EC_KEY *eckey, BIGNUM *priv_key)
 {
-    int ok = 0;
-    BN_CTX *ctx = NULL;
-    EC_POINT *pub_key = NULL;
-
     if (!eckey) return 0;
+
+    int ok = 0;
+    BN_CTX *ctx = nullptr;
+    EC_POINT *pub_key = nullptr;
 
     const EC_GROUP *group = EC_KEY_get0_group(eckey);
 
-    if ((ctx = BN_CTX_new()) == NULL)
+    if ((ctx = BN_CTX_new()) == nullptr)
         goto err;
 
     pub_key = EC_POINT_new(group);
 
-    if (pub_key == NULL)
+    if (pub_key == nullptr)
         goto err;
 
-    if (!EC_POINT_mul(group, pub_key, priv_key, NULL, NULL, ctx))
+    if (!EC_POINT_mul(group, pub_key, priv_key, nullptr, nullptr, ctx))
         goto err;
 
-    EC_KEY_set_private_key(eckey,priv_key);
-    EC_KEY_set_public_key(eckey,pub_key);
+    if (!EC_KEY_set_private_key(eckey,priv_key))
+        goto err;
+    if (!EC_KEY_set_public_key(eckey,pub_key))
+        goto err;
 
     ok = 1;
 
@@ -41,7 +44,7 @@ err:
 
     if (pub_key)
         EC_POINT_free(pub_key);
-    if (ctx != NULL)
+    if (ctx != nullptr)
         BN_CTX_free(ctx);
 
     return(ok);
@@ -363,26 +366,27 @@ CPubKey CKey::GetPubKey() const
 bool CKey::Sign(uint256 hash, std::vector<unsigned char>& vchSig)
 {
     vchSig.clear();
-    ECDSA_SIG *sig = ECDSA_do_sign((unsigned char*)&hash, sizeof(hash), pkey);
-    if (sig==NULL)
+    ECDSA_SIG *sig = ECDSA_do_sign(hash.begin(), sizeof(hash), pkey);
+    if (sig==nullptr)
         return false;
     const EC_GROUP *group = EC_KEY_get0_group(pkey);
 
     BIGNUM* order = BN_new(), *halforder = BN_new();
-    EC_GROUP_get_order(group, order, NULL);
+    EC_GROUP_get_order(group, order, nullptr);
     BN_rshift1(halforder, order);
 
     // Get internal R and S pointers
     const BIGNUM *current_s = ECDSA_SIG_get0_s(sig);
+    BIGNUM *current_r = BN_dup(ECDSA_SIG_get0_r(sig));
 
     // enforce low S values, by negating the value (modulo the order) if above order/2.
     if (BN_cmp(current_s, halforder) > 0) {
         BIGNUM *updated_s = BN_new();
         BN_copy(updated_s, current_s);
         BN_sub(updated_s, order, updated_s);
-        ECDSA_SIG_set0(sig, NULL, updated_s);
+        ECDSA_SIG_set0(sig, current_r, updated_s);
     }
-	
+
     BN_free(order);
     BN_free(halforder);
 
@@ -393,7 +397,7 @@ bool CKey::Sign(uint256 hash, std::vector<unsigned char>& vchSig)
     ECDSA_SIG_free(sig);
     vchSig.resize(nSize); // Shrink to fit actual size
     // Testing our new signature
-    if (ECDSA_verify(0, (unsigned char*)&hash, sizeof(hash), &vchSig[0], vchSig.size(), pkey) != 1) {
+    if (ECDSA_verify(0, hash.begin(), sizeof(hash), &vchSig[0], vchSig.size(), pkey) != 1) {
         vchSig.clear();
         return false;
     }
@@ -407,28 +411,29 @@ bool CKey::Sign(uint256 hash, std::vector<unsigned char>& vchSig)
 bool CKey::SignCompact(uint256 hash, std::vector<unsigned char>& vchSig)
 {
     bool fOk = false;
-    ECDSA_SIG *sig = ECDSA_do_sign((unsigned char*)&hash, sizeof(hash), pkey);
-    if (sig==NULL)
+    ECDSA_SIG *sig = ECDSA_do_sign(hash.begin(), sizeof(hash), pkey);
+    if (sig==nullptr)
         return false;
     const EC_GROUP *group = EC_KEY_get0_group(pkey);
     BIGNUM* order = BN_new(), *halforder = BN_new();
-    EC_GROUP_get_order(group, order, NULL);
+    EC_GROUP_get_order(group, order, nullptr);
     BN_rshift1(halforder, order);
 
     // Get internal R and S pointers
     const BIGNUM *current_s = ECDSA_SIG_get0_s(sig);
+    BIGNUM *current_r = BN_dup(ECDSA_SIG_get0_r(sig));
 
     // enforce low S values, by negating the value (modulo the order) if above order/2.
     if (BN_cmp(current_s, halforder) > 0) {
         BIGNUM *updated_s = BN_new();
         BN_copy(updated_s, current_s);
         BN_sub(updated_s, order, updated_s);
-        ECDSA_SIG_set0(sig, NULL, updated_s);
+        ECDSA_SIG_set0(sig, current_r, updated_s);
     }
 
     BN_free(order);
     BN_free(halforder);
-	
+
     vchSig.clear();
     vchSig.resize(65,0);
     int nBitsR = BN_num_bits(ECDSA_SIG_get0_r(sig));
@@ -442,7 +447,7 @@ bool CKey::SignCompact(uint256 hash, std::vector<unsigned char>& vchSig)
             CKey keyRec;
             keyRec.fSet = true;
             keyRec.SetCompressedPubKey(fCompressedPubKey);
-            if (ECDSA_SIG_recover_key_GFp(keyRec.pkey, sig, (unsigned char*)&hash, sizeof(hash), i, 1) == 1)
+            if (ECDSA_SIG_recover_key_GFp(keyRec.pkey, sig, hash.begin(), sizeof(hash), i, 1) == 1)
                 if (keyRec.GetPubKey() == this->GetPubKey())
                 {
                     nRecId = i;
@@ -461,7 +466,7 @@ bool CKey::SignCompact(uint256 hash, std::vector<unsigned char>& vchSig)
         BN_bn2bin(ECDSA_SIG_get0_s(sig),&vchSig[65-(nBitsS+7)/8]);
         fOk = true;
     }
-	
+
     ECDSA_SIG_free(sig);
     return fOk;
 }
@@ -509,6 +514,16 @@ bool CPubKey::SetCompactSignature(uint256 hash, const std::vector<unsigned char>
     if (!fSuccessful)
         Invalidate();
     return fSuccessful;
+}
+
+CKeyID CPubKey::GetID() const
+{
+    return CKeyID(Hash160(vbytes, vbytes + size()));
+}
+
+uint256 CPubKey::GetHash() const
+{
+    return Hash(vbytes, vbytes + size());
 }
 
 bool CPubKey::Verify(const uint256 &hash, const std::vector<unsigned char>& vchSig) const
@@ -1174,6 +1189,8 @@ bool CMalleableKeyView::CheckKeyVariant(const CPubKey &R, const CPubKey &vchPubK
     return true;
 }
 
+bool CMalleableKeyView::operator <(const CMalleableKeyView &kv) const { return vchPubKeyH.GetID() < kv.vchPubKeyH.GetID(); }
+
 std::string CMalleableKeyView::ToString() const
 {
     CDataStream ssKey(SER_NETWORK, PROTOCOL_VERSION);
@@ -1213,3 +1230,11 @@ bool CMalleableKeyView::IsValid() const
 {
     return vchSecretL.size() == 32 && GetMalleablePubKey().IsValid();
 }
+
+CScriptID::CScriptID() : uint160(0) { }
+
+CScriptID::CScriptID(const uint160 &in) : uint160(in) { }
+
+CKeyID::CKeyID() : uint160(0) { }
+
+CKeyID::CKeyID(const uint160 &in) : uint160(in) { }

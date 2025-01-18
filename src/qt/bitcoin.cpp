@@ -9,7 +9,8 @@
 #include "guiconstants.h"
 
 #include "init.h"
-#include "ui_interface.h"
+#include "main.h"
+#include "interface.h"
 #include "qtipcserver.h"
 #include "intro.h"
 
@@ -177,8 +178,7 @@ int main(int argc, char *argv[])
     ParseParameters(argc, argv);
 
     // User language is set up: pick a data directory
-        if (!Intro::pickDataDirectory())
-        return 0;
+    Intro::pickDataDirectory();
 
     // Install global event filter that makes sure that long tooltips can be word-wrapped
     app.installEventFilter(new GUIUtil::ToolTipToRichTextFilter(TOOLTIP_WRAP_THRESHOLD, &app));
@@ -284,5 +284,4 @@ int main(int argc, char *argv[])
     }
     return 0;
 }
-
 #endif // BITCOIN_QT_TEST

@@ -3,7 +3,10 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
-#include <map>
+#include "txdb-leveldb.h"
+#include "kernel.h"
+#include "checkpoints.h"
+#include "main.h"
 
 #include <boost/version.hpp>
 #include <boost/filesystem.hpp>
@@ -14,14 +17,7 @@
 #include <leveldb/filter_policy.h>
 #include <memenv/memenv.h>
 
-#include "kernel.h"
-#include "checkpoints.h"
-#include "txdb.h"
-#include "util.h"
-#include "main.h"
-
 using namespace std;
-using namespace boost;
 
 leveldb::DB *txdb; // global pointer for LevelDB object instance
 
@@ -64,7 +60,7 @@ void init_blockindex(leveldb::Options& options, bool fRemoveOld = false) {
 }
 
 // CDB subclasses are created and destroyed VERY OFTEN. That's why
-// we shouldn't treat this as a free operations.
+// we shouldn't treat this a s free operations.
 CTxDB::CTxDB(const char* pszMode)
 {
     assert(pszMode);
@@ -410,13 +406,13 @@ bool CTxDB::LoadBlockIndex()
     // Calculate nChainTrust
     vector<pair<int, CBlockIndex*> > vSortedByHeight;
     vSortedByHeight.reserve(mapBlockIndex.size());
-    BOOST_FOREACH(const PAIRTYPE(uint256, CBlockIndex*)& item, mapBlockIndex)
+    for (const auto& item : mapBlockIndex)
     {
         CBlockIndex* pindex = item.second;
         vSortedByHeight.push_back(make_pair(pindex->nHeight, pindex));
     }
     sort(vSortedByHeight.begin(), vSortedByHeight.end());
-    BOOST_FOREACH(const PAIRTYPE(int, CBlockIndex*)& item, vSortedByHeight)
+    for (const auto& item : vSortedByHeight)
     {
         CBlockIndex* pindex = item.second;
         pindex->nChainTrust = (pindex->pprev ? pindex->pprev->nChainTrust : 0) + pindex->GetBlockTrust();
@@ -482,7 +478,7 @@ bool CTxDB::LoadBlockIndex()
         {
             pair<unsigned int, unsigned int> pos = make_pair(pindex->nFile, pindex->nBlockPos);
             mapBlockPos[pos] = pindex;
-            BOOST_FOREACH(const CTransaction &tx, block.vtx)
+            for (const CTransaction &tx : block.vtx)
             {
                 uint256 hashTx = tx.GetHash();
                 CTxIndex txindex;
@@ -509,7 +505,7 @@ bool CTxDB::LoadBlockIndex()
                     unsigned int nOutput = 0;
                     if (nCheckLevel>3)
                     {
-                        BOOST_FOREACH(const CDiskTxPos &txpos, txindex.vSpent)
+                        for (const CDiskTxPos &txpos : txindex.vSpent)
                         {
                             if (!txpos.IsNull())
                             {
@@ -536,7 +532,7 @@ bool CTxDB::LoadBlockIndex()
                                     else
                                     {
                                         bool fFound = false;
-                                        BOOST_FOREACH(const CTxIn &txin, txSpend.vin)
+                                        for (const CTxIn &txin : txSpend.vin)
                                             if (txin.prevout.hash == hashTx && txin.prevout.n == nOutput)
                                                 fFound = true;
                                         if (!fFound)
@@ -554,7 +550,7 @@ bool CTxDB::LoadBlockIndex()
                 // check level 5: check whether all prevouts are marked spent
                 if (nCheckLevel>4)
                 {
-                     BOOST_FOREACH(const CTxIn &txin, tx.vin)
+                     for (const CTxIn &txin : tx.vin)
                      {
                           CTxIndex txindex;
                           if (ReadTxIndex(txin.prevout.hash, txindex))

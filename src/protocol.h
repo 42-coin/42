@@ -8,9 +8,8 @@
 
 #include "serialize.h"
 #include "netbase.h"
-#include <string>
-#include <limits>
 #include "uint256.h"
+#include "version.h"
 
 extern bool fTestNet;
 inline unsigned short GetDefaultPort()
@@ -21,11 +20,12 @@ inline unsigned short GetDefaultPort()
 
 extern unsigned char pchMessageStart[4];
 
-// Message header.
-// (4) network identifier.
-// (12) command.
-// (4) size.
-// (4) checksum.
+/** Message header.
+ * (4) message start.
+ * (12) command.
+ * (4) size.
+ * (4) checksum.
+ */
 class CMessageHeader
 {
     public:

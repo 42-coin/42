@@ -47,8 +47,14 @@ OptionsDialog::OptionsDialog(QWidget *parent) :
     ui->TorOnly->setEnabled(false);
     ui->torName->setEnabled(false);
 
+    ui->socksVersion->setEnabled(false);
+    ui->socksVersion->addItem("5", 5);
+    ui->socksVersion->addItem("4", 4);
+    ui->socksVersion->setCurrentIndex(0);
+
     connect(ui->connectSocks, SIGNAL(toggled(bool)), ui->proxyIp, SLOT(setEnabled(bool)));
     connect(ui->connectSocks, SIGNAL(toggled(bool)), ui->proxyPort, SLOT(setEnabled(bool)));
+    connect(ui->connectSocks, SIGNAL(toggled(bool)), ui->socksVersion, SLOT(setEnabled(bool)));
     connect(ui->connectSocks, SIGNAL(clicked(bool)), this, SLOT(showRestartWarning_Proxy()));
 
     connect(ui->connectTor, SIGNAL(clicked(bool)), this, SLOT(showRestartWarning_Tor()));
@@ -152,12 +158,12 @@ void OptionsDialog::setMapper()
     /* Main */
     mapper->addMapping(ui->transactionFee, OptionsModel::Fee);
     mapper->addMapping(ui->bitcoinAtStartup, OptionsModel::StartAtStartup);
-    mapper->addMapping(ui->detachDatabases, OptionsModel::DetachDatabases);
 
     /* Network */
     mapper->addMapping(ui->connectSocks, OptionsModel::ProxyUse);
     mapper->addMapping(ui->proxyIp, OptionsModel::ProxyIP);
     mapper->addMapping(ui->proxyPort, OptionsModel::ProxyPort);
+    mapper->addMapping(ui->socksVersion, OptionsModel::ProxySocksVersion);
 
     mapper->addMapping(ui->connectTor, OptionsModel::TorUse);
     mapper->addMapping(ui->torIp, OptionsModel::TorIP);

@@ -6,6 +6,7 @@
 #include "irc.h"
 #include "base58.h"
 #include "net.h"
+#include "random.h"
 
 using namespace std;
 
@@ -274,10 +275,8 @@ void ThreadIRCSeed2(void* parg)
             {
                 printf("IRC name already in use\n");
                 nNameRetry++;
-                if (Wait(10))
-                    continue;
-                else
-                    return;
+                Wait(10);
+                continue;
             }
             nErrorWait = nErrorWait * 11 / 10;
             if (Wait(nErrorWait += 60))

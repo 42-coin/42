@@ -6,18 +6,15 @@
 #ifndef _BITCOINRPC_H_
 #define _BITCOINRPC_H_ 1
 
-#include <string>
-#include <list>
-#include <map>
-
-class CBlockIndex;
+#include "checkpoints.h"
 
 #include "json/json_spirit_reader_template.h"
 #include "json/json_spirit_writer_template.h"
 #include "json/json_spirit_utils.h"
 
-#include "util.h"
-#include "checkpoints.h"
+#include <string>
+#include <list>
+#include <map>
 
 // HTTP status codes
 enum HTTPStatusCode
@@ -109,8 +106,8 @@ private:
     std::map<std::string, const CRPCCommand*> mapCommands;
 public:
     CRPCTable();
-    const CRPCCommand* operator[](std::string name) const;
-    std::string help(std::string name) const;
+    const CRPCCommand* operator[](const std::string& name) const;
+    std::string help(const std::string& name) const;
 
     /**
      * Execute a method.
@@ -120,7 +117,7 @@ public:
      * @throws an exception (json_spirit::Value) when an error happens.
      */
     json_spirit::Value execute(const std::string &method, const json_spirit::Array &params) const;
-	
+
     /**
     * Returns a list of registered commands
     * @returns List of registered commands.
@@ -146,10 +143,10 @@ extern void EnsureWalletIsUnlocked();
 // Utilities: convert hex-encoded Values
 // (throws error if not hex).
 //
-extern uint256 ParseHashV(const json_spirit::Value& v, std::string strName);
-extern uint256 ParseHashO(const json_spirit::Object& o, std::string strKey);
-extern std::vector<unsigned char> ParseHexV(const json_spirit::Value& v, std::string strName);
-extern std::vector<unsigned char> ParseHexO(const json_spirit::Object& o, std::string strKey); 
+extern uint256 ParseHashV(const json_spirit::Value& v, const std::string& strName);
+extern uint256 ParseHashO(const json_spirit::Object& o, const std::string& strKey);
+extern std::vector<unsigned char> ParseHexV(const json_spirit::Value& v, const std::string& strName);
+extern std::vector<unsigned char> ParseHexO(const json_spirit::Object& o, const std::string& strKey); 
 
 extern json_spirit::Value getconnectioncount(const json_spirit::Array& params, bool fHelp); // in rpcnet.cpp
 extern json_spirit::Value getpeerinfo(const json_spirit::Array& params, bool fHelp);

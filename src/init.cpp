@@ -2,17 +2,19 @@
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-#include "txdb.h"
+#include "init.h"
+#include "wallet.h"
+#include "base58.h"
+#include "txdb-leveldb.h"
 #include "walletdb.h"
 #include "bitcoinrpc.h"
 #include "net.h"
-#include "init.h"
+#include "random.h"
 #include "util.h"
 #include "ipcollector.h"
-#include "ui_interface.h"
+#include "interface.h"
 #include "checkpoints.h"
-#include <boost/format.hpp>
-#include <boost/filesystem.hpp>
+
 #include <boost/filesystem/fstream.hpp>
 #include <boost/filesystem/convenience.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
@@ -23,9 +25,6 @@
 #include <signal.h>
 #endif
 
-
-using namespace std;
-using namespace boost;
 
 CWallet* pwalletMain;
 CClientUIInterface uiInterface;
@@ -232,7 +231,7 @@ bool static Bind(const CService &addr, bool fError = true) {
 // Core-specific options shared between UI and daemon
 std::string HelpMessage()
 {
-    string strUsage = _("Options:") + "\n" +
+    std::string strUsage = _("Options:") + "\n" +
         "  -?                     " + _("This help message") + "\n" +
         "  -conf=<file>           " + _("Specify configuration file (default: 42.conf)") + "\n" +
         "  -pid=<file>            " + _("Specify pid file (default: 42d.pid)") + "\n" +
@@ -241,7 +240,8 @@ std::string HelpMessage()
         "  -dbcache=<n>           " + _("Set database cache size in megabytes (default: 25)") + "\n" +
         "  -dblogsize=<n>         " + _("Set database disk log size in megabytes (default: 100)") + "\n" +
         "  -timeout=<n>           " + _("Specify connection timeout in milliseconds (default: 5000)") + "\n" +
-        "  -proxy=<ip:port>       " + _("Connect through socks5 proxy") + "\n" +
+        "  -proxy=<ip:port>       " + _("Connect through socks proxy") + "\n" +
+        "  -socks=<n>             " + _("Select the version of socks proxy to use (4-5, default: 5)") + "\n" +
         "  -tor=<ip:port>         " + _("Use proxy to reach tor hidden services (default: same as -proxy)") + "\n"
         "  -torname=<host.onion>  " + _("Send the specified hidden service name when connecting to Tor nodes (default: none)") + "\n"
         "  -dns                   " + _("Allow DNS lookups for -addnode, -seednode and -connect") + "\n" +
@@ -262,14 +262,13 @@ std::string HelpMessage()
         "  -bantime=<n>           " + _("Number of seconds to keep misbehaving peers from reconnecting (default: 86400)") + "\n" +
         "  -maxreceivebuffer=<n>  " + _("Maximum per-connection receive buffer, <n>*1000 bytes (default: 5000)") + "\n" +
         "  -maxsendbuffer=<n>     " + _("Maximum per-connection send buffer, <n>*1000 bytes (default: 1000)") + "\n" +
-        "  -detachdb              " + _("Detach block and address databases. Increases shutdown time (default: 0)") + "\n" +
 
 #ifdef DB_LOG_IN_MEMORY
         "  -memorylog             " + _("Use in-memory logging for block index database (default: 1)") + "\n" +
 #endif
 
         "  -paytxfee=<amt>        " + _("Fee per KB to add to transactions you send") + "\n" +
-        "  -mininput=<amt>        " + str(boost::format(_("When creating transactions, ignore inputs with value less than this (default: %s)")) % FormatMoney(MIN_TXOUT_AMOUNT)) + "\n" +
+        "  -mininput=<amt>        " + (_("When creating transactions, ignore inputs with value less than this (default: ") + FormatMoney(MIN_TXOUT_AMOUNT) + ")") + "\n" +
 #ifdef QT_GUI
         "  -server                " + _("Accept command line and JSON-RPC commands") + "\n" +
 #endif
@@ -310,37 +309,6 @@ std::string HelpMessage()
         "  -blockprioritysize=<n> "   + _("Set maximum size of high-priority/low-fee transactions in bytes (default: 27000)") + "\n";
 
     return strUsage;
-}
-
-bool DropBlockIndex()
-{
-    try
-    {
-#ifdef USE_LEVELDB
-        filesystem::path directory = GetDataDir() / "txleveldb";
-        filesystem::remove_all(directory); // remove directory
-#else
-        filesystem::path indexFile = GetDataDir() / "blkindex.dat";
-        filesystem::remove(indexFile); // remove index file
-#endif
-
-        unsigned int nFile = 1;
-        for ( ; ; )
-        {
-            filesystem::path strBlockFile = GetDataDir() / strprintf("blk%04u.dat", nFile);
-            // Break if no such file
-            if( !filesystem::exists( strBlockFile ) )
-                break;
-            filesystem::remove(strBlockFile);
-            nFile++;
-        }
-        return true;
-    }
-    catch(std::exception &e)
-    {
-        // TODO: report error here
-        return false;
-    }
 }
 
 /** Initialize bitcoin.
@@ -405,7 +373,7 @@ bool AppInit2()
     fUseMemoryLog = GetBoolArg("-memorylog", true);
 
     // Ping and address broadcast intervals
-    nPingInterval = max<int64_t>(10 * 60, GetArg("-keepalive", 30 * 60));
+    nPingInterval = std::max<int64_t>(10 * 60, GetArg("-keepalive", 30 * 60));
 
     CheckpointsMode = Checkpoints::STRICT;
     std::string strCpMode = GetArg("-cppolicy", "strict");
@@ -483,8 +451,6 @@ bool AppInit2()
         fDebugNet = true;
     else
         fDebugNet = GetBoolArg("-debugnet");
-
-    bitdb.SetDetach(GetBoolArg("-detachdb", false));
 
 #if !defined(WIN32) && !defined(QT_GUI)
     fDaemon = GetBoolArg("-daemon");
@@ -579,6 +545,7 @@ bool AppInit2()
         printf("Startup time: %s\n", DateTimeStrFormat("%x %H:%M:%S", GetTime()).c_str());
     printf("Default data directory %s\n", GetDefaultDataDir().string().c_str());
     printf("Used data directory %s\n", strDataDir.c_str());
+    std::ostringstream strErrors;
 
     if (fDaemon)
         fprintf(stdout, "42 server starting\n");
@@ -589,13 +556,15 @@ bool AppInit2()
             NewThread(ThreadScriptCheck, NULL);
     }
 
+    int64_t nStart;
+
     // ********************************************************* Step 5: verify database integrity
 
     uiInterface.InitMessage(_("Verifying database integrity..."));
 
     if (!bitdb.Open(GetDataDir()))
     {
-        string msg = strprintf(_("Error initializing database environment %s!"
+        std::string msg = strprintf(_("Error initializing database environment %s!"
                                  " To recover, BACKUP THAT DIRECTORY, then remove"
                                  " everything from it except for wallet.dat."), strDataDir.c_str());
         return InitError(msg);
@@ -613,7 +582,7 @@ bool AppInit2()
         CDBEnv::VerifyResult r = bitdb.Verify(strWalletFileName, CWalletDB::Recover);
         if (r == CDBEnv::RECOVER_OK)
         {
-            string msg = strprintf(_("Warning: wallet.dat corrupt, data salvaged!"
+            std::string msg = strprintf(_("Warning: wallet.dat corrupt, data salvaged!"
                                      " Original wallet.dat saved as wallet.{timestamp}.bak in %s; if"
                                      " your balance or transactions are incorrect you should"
                                      " restore from a backup."), strDataDir.c_str());
@@ -625,9 +594,14 @@ bool AppInit2()
 
     // ********************************************************* Step 6: network initialization
 
+    int nSocksVersion = GetArgInt("-socks", 5);
+
+    if (nSocksVersion != 4 && nSocksVersion != 5)
+        return InitError(strprintf(_("Unknown -socks proxy version requested: %i"), nSocksVersion));
+
     if (mapArgs.count("-onlynet")) {
         std::set<enum Network> nets;
-        BOOST_FOREACH(std::string snet, mapMultiArgs["-onlynet"]) {
+        for (std::string snet : mapMultiArgs["-onlynet"]) {
             enum Network net = ParseNetwork(snet);
             if (net == NET_UNROUTABLE)
                 return InitError(strprintf(_("Unknown network specified in -onlynet: '%s'"), snet.c_str()));
@@ -639,6 +613,12 @@ bool AppInit2()
                 SetLimited(net);
         }
     }
+#if defined(USE_IPV6)
+#if ! USE_IPV6
+    else
+        SetLimited(NET_IPV6);
+#endif
+#endif
 
     CService addrProxy;
     bool fProxy = false;
@@ -648,10 +628,14 @@ bool AppInit2()
             return InitError(strprintf(_("Invalid -proxy address: '%s'"), mapArgs["-proxy"].c_str()));
 
         if (!IsLimited(NET_IPV4))
-            SetProxy(NET_IPV4, addrProxy);
+            SetProxy(NET_IPV4, addrProxy, nSocksVersion);
+        if (nSocksVersion > 4) {
+#ifdef USE_IPV6
             if (!IsLimited(NET_IPV6))
-                SetProxy(NET_IPV6, addrProxy);
-            SetNameProxy(addrProxy);
+                SetProxy(NET_IPV6, addrProxy, nSocksVersion);
+#endif
+            SetNameProxy(addrProxy, nSocksVersion);
+        }
         fProxy = true;
     }
 
@@ -664,7 +648,7 @@ bool AppInit2()
             addrOnion = CService(mapArgs["-tor"], nSocksDefault);
         if (!addrOnion.IsValid())
             return InitError(strprintf(_("Invalid -tor address: '%s'"), mapArgs["-tor"].c_str()));
-        SetProxy(NET_TOR, addrOnion);
+        SetProxy(NET_TOR, addrOnion, 5);
         SetReachable(NET_TOR);
     }
 
@@ -687,7 +671,7 @@ bool AppInit2()
     {
         std::string strError;
         if (mapArgs.count("-bind")) {
-            BOOST_FOREACH(std::string strBind, mapMultiArgs["-bind"]) {
+            for(std::string strBind : mapMultiArgs["-bind"]) {
                 CService addrBind;
                 if (!Lookup(strBind.c_str(), addrBind, GetListenPort(), false))
                     return InitError(strprintf(_("Cannot resolve -bind address: '%s'"), strBind.c_str()));
@@ -696,8 +680,10 @@ bool AppInit2()
         } else {
             struct in_addr inaddr_any;
             inaddr_any.s_addr = INADDR_ANY;
+#ifdef USE_IPV6
             if (!IsLimited(NET_IPV6))
                 fBound |= Bind(CService(in6addr_any, GetListenPort()), false);
+#endif
             if (!IsLimited(NET_IPV4))
                 fBound |= Bind(CService(inaddr_any, GetListenPort()), !fBound);
 
@@ -713,15 +699,17 @@ bool AppInit2()
         struct in_addr inaddr_loopback;
         inaddr_loopback.s_addr = htonl(INADDR_LOOPBACK);
 
+#ifdef USE_IPV6
         if (!BindListenPort(CService(in6addr_loopback, GetListenPort()), strError))
             return InitError(strError);
+#endif
         if (!BindListenPort(CService(inaddr_loopback, GetListenPort()), strError))
             return InitError(strError);
     }
 
     if (mapArgs.count("-externalip"))
     {
-        BOOST_FOREACH(string strAddr, mapMultiArgs["-externalip"]) {
+        for (std::string strAddr : mapMultiArgs["-externalip"]) {
             CService addrLocal(strAddr, GetListenPort(), fNameLookup);
             if (!addrLocal.IsValid())
                 return InitError(strprintf(_("Cannot resolve -externalip address: '%s'"), strAddr.c_str()));
@@ -744,14 +732,14 @@ bool AppInit2()
             InitError(_("Unable to sign checkpoint, wrong checkpointkey?\n"));
     }
 
-    BOOST_FOREACH(string strDest, mapMultiArgs["-seednode"])
+    for (std::string strDest : mapMultiArgs["-seednode"])
         AddOneShot(strDest);
 
     // ********************************************************* Step 7: load blockchain
 
     if (!bitdb.Open(GetDataDir()))
     {
-        string msg = strprintf(_("Error initializing database environment %s!"
+        std::string msg = strprintf(_("Error initializing database environment %s!"
                                  " To recover, BACKUP THAT DIRECTORY, then remove"
                                  " everything from it except for wallet.dat."), strDataDir.c_str());
         return InitError(msg);
@@ -768,7 +756,6 @@ bool AppInit2()
 
     printf("Loading block index...\n");
     bool fLoaded = false;
-    int64_t nStart;
     while (!fLoaded) {
         std::string strLoadError;
         uiInterface.InitMessage(_("Loading block index..."));
@@ -791,7 +778,6 @@ bool AppInit2()
         } while(false);
 
         if (!fLoaded) {
-            DropBlockIndex();
             // TODO: suggest reindex here
             return InitError(strLoadError);
         }
@@ -815,12 +801,12 @@ bool AppInit2()
 
     if (mapArgs.count("-printblock"))
     {
-        string strMatch = mapArgs["-printblock"];
+        std::string strMatch = mapArgs["-printblock"];
         int nFound = 0;
-        for (map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
+        for (auto mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
         {
             uint256 hash = (*mi).first;
-            if (strMatch.compare(hash.ToString()) == 0)
+            if (strncmp(hash.ToString().c_str(), strMatch.c_str(), strMatch.size()) == 0)
             {
                 CBlockIndex* pindex = (*mi).second;
                 CBlock block;
@@ -854,7 +840,6 @@ bool AppInit2()
     uiInterface.InitMessage(_("Loading wallet..."));
     printf("Loading wallet...\n");
     nStart = GetTimeMillis();
-    std::ostringstream strErrors;
     bool fFirstRun = true;
     pwalletMain = new CWallet(strWalletFileName);
     DBErrors nLoadWalletRet = pwalletMain->LoadWallet(fFirstRun);
@@ -864,7 +849,7 @@ bool AppInit2()
             strErrors << _("Error loading wallet.dat: Wallet corrupted") << "\n";
         else if (nLoadWalletRet == DB_NONCRITICAL_ERROR)
         {
-            string msg(_("Warning: error reading wallet.dat! All keys read correctly, but transaction data"
+            std::string msg(_("Warning: error reading wallet.dat! All keys read correctly, but transaction data"
                          " or address book entries might be missing or incorrect."));
             uiInterface.ThreadSafeMessageBox(msg, _("42"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION | CClientUIInterface::MODAL);
         }
@@ -946,7 +931,7 @@ bool AppInit2()
     {
         uiInterface.InitMessage(_("Importing blockchain data file."));
 
-        BOOST_FOREACH(string strFile, mapMultiArgs["-loadblock"])
+        for (std::string strFile : mapMultiArgs["-loadblock"])
         {
             FILE *file = fopen(strFile.c_str(), "rb");
             if (file)
@@ -974,6 +959,7 @@ bool AppInit2()
     nStart = GetTimeMillis();
 
     {
+        CAddrDB::SetMessageStart(pchMessageStart);
         CAddrDB adb;
         if (!adb.Read(addrman))
             printf("Invalid or missing peers.dat; recreating\n");

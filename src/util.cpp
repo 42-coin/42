@@ -4,40 +4,24 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "util.h"
+#include "allocators.h"
+#include "interface.h"
+#include "random.h"
 #include "sync.h"
 #include "version.h"
-#include "ui_interface.h"
-#include <boost/algorithm/string/join.hpp>
-#include <boost/algorithm/string/case_conv.hpp> // for to_lower()
-#include <boost/algorithm/string/predicate.hpp> // for startswith() and endswith()
+
 #include <boost/program_options/detail/config_file.hpp>
-#include <boost/program_options/parsers.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
-
 #include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/foreach.hpp>
 #include <boost/thread.hpp>
-#include <openssl/crypto.h>
-#include <openssl/rand.h>
 
 #ifdef WIN32
-#ifdef _WIN32_WINNT
-#undef _WIN32_WINNT
-#endif
-#define _WIN32_WINNT 0x0501
-#ifdef _WIN32_IE
-#undef _WIN32_IE
-#endif
-#define _WIN32_IE 0x0501
-#define WIN32_LEAN_AND_MEAN 1
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
 #include <io.h> /* for _commit */
 #include "shlobj.h"
+#include <openssl/rand.h> // RAND_screen
 #elif defined(__linux__)
-# include <sys/prctl.h>
+#include <sys/prctl.h>
 #endif
 
 #if !defined(WIN32) && !defined(ANDROID)
@@ -63,7 +47,6 @@ string strMiscWarning;
 bool fTestNet = false;
 bool fNoListen = false;
 bool fLogTimestamps = false;
-CMedianFilter<int64_t> vTimeOffsets(200,0);
 bool fReopenDebugLog = false;
 
 // Extended DecodeDumpTime implementation, see this page for details:
@@ -95,8 +78,6 @@ void locking_callback(int mode, int i, const char* file, int line)
         LEAVE_CRITICAL_SECTION(*ppmutexOpenSSL[i]);
     }
 }
-
-LockedPageManager LockedPageManager::instance;
 
 // Init
 class CInit
@@ -130,79 +111,6 @@ public:
 instance_of_cinit;
 
 
-
-
-
-
-
-
-void RandAddSeed()
-{
-    // Seed with CPU performance counter
-    int64_t nCounter = GetPerformanceCounter();
-    RAND_add(&nCounter, sizeof(nCounter), 1.5);
-    memset(&nCounter, 0, sizeof(nCounter));
-}
-
-void RandAddSeedPerfmon()
-{
-    RandAddSeed();
-
-    // This can take up to 2 seconds, so only do it every 10 minutes
-    static int64_t nLastPerfmon;
-    if (GetTime() < nLastPerfmon + 10 * 60)
-        return;
-    nLastPerfmon = GetTime();
-
-#ifdef WIN32
-    // Don't need this on Linux, OpenSSL automatically uses /dev/urandom
-    // Seed with the entire set of perfmon data
-    unsigned char pdata[250000];
-    memset(pdata, 0, sizeof(pdata));
-    unsigned long nSize = sizeof(pdata);
-    long ret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, "Global", NULL, NULL, pdata, &nSize);
-    RegCloseKey(HKEY_PERFORMANCE_DATA);
-    if (ret == ERROR_SUCCESS)
-    {
-        RAND_add(pdata, nSize, nSize/100.0);
-        OPENSSL_cleanse(pdata, nSize);
-        printf("RandAddSeed() %lu bytes\n", nSize);
-    }
-#endif
-}
-
-uint64_t GetRand(uint64_t nMax)
-{
-    if (nMax == 0)
-        return 0;
-
-    // The range of the random source must be a multiple of the modulus
-    // to give every possible output value an equal possibility
-    uint64_t nRange = (std::numeric_limits<uint64_t>::max() / nMax) * nMax;
-    uint64_t nRand = 0;
-    do
-        RAND_bytes((unsigned char*)&nRand, sizeof(nRand));
-    while (nRand >= nRange);
-    return (nRand % nMax);
-}
-
-int GetRandInt(int nMax)
-{
-    return static_cast<int>(GetRand(nMax));
-}
-
-uint256 GetRandHash()
-{
-    uint256 hash;
-    RAND_bytes((unsigned char*)&hash, sizeof(hash));
-    return hash;
-}
-
-
-
-
-
-
 static FILE* fileout = NULL;
 
 inline int OutputDebugStringF(const char* pszFormat, ...)
@@ -234,9 +142,9 @@ inline int OutputDebugStringF(const char* pszFormat, ...)
             // Since the order of destruction of static/global objects is undefined,
             // allocate mutexDebugLog on the heap the first time this routine
             // is called to avoid crashes during shutdown.
-            static boost::mutex* mutexDebugLog = NULL;
-            if (mutexDebugLog == NULL) mutexDebugLog = new boost::mutex();
-            boost::mutex::scoped_lock scoped_lock(*mutexDebugLog);
+            static std::mutex* mutexDebugLog = nullptr;
+            if (mutexDebugLog == nullptr) mutexDebugLog = new std::mutex();
+            std::scoped_lock scoped_lock(*mutexDebugLog);
 
             // reopen the log file, if requested
             if (fReopenDebugLog) {
@@ -435,7 +343,7 @@ bool ParseMoney(const char* pszIn, int64_t& nRet)
         return false;
     if (nUnits < 0 || nUnits > COIN)
         return false;
-    int64_t nWhole = strtoll(strWhole);
+    int64_t nWhole = atoi64(strWhole);
     int64_t nValue = nWhole*COIN + nUnits;
 
     nRet = nValue;
@@ -463,7 +371,7 @@ static const signed char phexdigit[256] =
 
 bool IsHex(const string& str)
 {
-    BOOST_FOREACH(unsigned char c, str)
+    for (unsigned char c : str)
     {
         if (phexdigit[c] < 0)
             return false;
@@ -527,8 +435,8 @@ void ParseParameters(int argc, const char* const argv[])
             str = str.substr(0, is_index);
         }
 #ifdef WIN32
-        boost::to_lower(str);
-        if (boost::algorithm::starts_with(str, "/"))
+        std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+        if (str.compare(0,1, "/") == 0)
             str = "-" + str.substr(1);
 #endif
         if (str[0] != '-')
@@ -539,7 +447,7 @@ void ParseParameters(int argc, const char* const argv[])
     }
 
     // New 0.6 features:
-    BOOST_FOREACH(const PAIRTYPE(string,string)& entry, mapArgs)
+    for (const auto& entry : mapArgs)
     {
         string name = entry.first;
 
@@ -567,7 +475,7 @@ std::string GetArg(const std::string& strArg, const std::string& strDefault)
 int64_t GetArg(const std::string& strArg, int64_t nDefault)
 {
     if (mapArgs.count(strArg))
-        return strtoll(mapArgs[strArg]);
+        return atoi64(mapArgs[strArg]);
     return nDefault;
 }
 
@@ -964,7 +872,7 @@ std::string EncodeDumpTime(int64_t nTime) {
 
 std::string EncodeDumpString(const std::string &str) {
     std::stringstream ret;
-    BOOST_FOREACH(unsigned char c, str) {
+    for (unsigned char c : str) {
         if (c <= 32 || c >= 128 || c == '%') {
             ret << '%' << HexStr(&c, &c + 1);
         } else {
@@ -1038,6 +946,12 @@ static std::string FormatException(std::exception* pex, const char* pszThread)
     else
         return strprintf(
             "UNKNOWN EXCEPTION       \n%s in %s       \n", pszModule, pszThread);
+}
+
+void LogException(std::exception* pex, const char* pszThread)
+{
+    std::string message = FormatException(pex, pszThread);
+    printf("\n%s", message.c_str());
 }
 
 void PrintException(std::exception* pex, const char* pszThread)
@@ -1156,7 +1070,7 @@ void createConf()
 #endif
     pConf << "rpcuser=user\nrpcpassword="
             + randomStrGen(15)
-            + "\nrpcport=2121"
+            + "\nrpcport=8344"
             + "\n#(0=off, 1=on) daemon - run in the background as a daemon and accept commands"
             + "\ndaemon=0"
             + "\n#(0=off, 1=on) server - accept command line and JSON-RPC commands"
@@ -1261,9 +1175,8 @@ void ShrinkDebugFile()
         // Restart the file with some of the end
         try {
             vector<char>* vBuf = new vector <char>(200000, 0);
-            size_t nBytes = 1; //write one byte if fseek failed
-            if (fseek(file, -((long)(vBuf->size())), SEEK_END) == 0)
-                nBytes = fread(&vBuf->operator[](0), 1, vBuf->size(), file);
+            fseek(file, -((long)(vBuf->size())), SEEK_END);
+            size_t nBytes = fread(&vBuf->operator[](0), 1, vBuf->size(), file);
             fclose(file);
             file = fopen(pathLog.string().c_str(), "w");
             if (file)
@@ -1284,109 +1197,12 @@ void ShrinkDebugFile()
 
 
 
-
-
-
-
-//
-// "Never go to sea with two chronometers; take one or three."
-// Our three time sources are:
-//  - System clock
-//  - Median of other nodes clocks
-//  - The user (asking the user to fix the system clock if the first two disagree)
-//
-
 // System clock
 int64_t GetTime()
 {
     int64_t now = time(NULL);
     assert(now > 0);
     return now;
-}
-
-// Trusted NTP offset or median of NTP samples.
-extern int64_t nNtpOffset;
-
-// Median of time samples given by other nodes.
-static int64_t nNodesOffset = INT64_MAX;
-
-// Select time offset:
-int64_t GetTimeOffset()
-{
-    // If NTP and system clock are in agreement within 40 minutes, then use NTP.
-    if (abs64(nNtpOffset) < 40 * 60)
-        return nNtpOffset;
-
-    // If not, then choose between median peer time and system clock.
-    if (abs64(nNodesOffset) < 70 * 60)
-        return nNodesOffset;
-
-    return 0;
-}
-
-int64_t GetNodesOffset()
-{
-        return nNodesOffset;
-}
-
-int64_t GetAdjustedTime()
-{
-    return GetTime() + GetTimeOffset();
-}
-
-void AddTimeData(const CNetAddr& ip, int64_t nTime)
-{
-    int64_t nOffsetSample = nTime - GetTime();
-
-    // Ignore duplicates
-    static set<CNetAddr> setKnown;
-    if (!setKnown.insert(ip).second)
-        return;
-
-    // Add data
-    vTimeOffsets.input(nOffsetSample);
-    printf("Added time data, samples %d, offset %+" PRId64 " (%+" PRId64 " minutes)\n", vTimeOffsets.size(), nOffsetSample, nOffsetSample/60);
-    if (vTimeOffsets.size() >= 5 && vTimeOffsets.size() % 2 == 1)
-    {
-        int64_t nMedian = vTimeOffsets.median();
-        std::vector<int64_t> vSorted = vTimeOffsets.sorted();
-        // Only let other nodes change our time by so much
-        if (abs64(nMedian) < 70 * 60)
-        {
-            nNodesOffset = nMedian;
-        }
-        else
-        {
-            nNodesOffset = INT64_MAX;
-
-            static bool fDone;
-            if (!fDone)
-            {
-                bool fMatch = false;
-
-                // If nobody has a time different than ours but within 5 minutes of ours, give a warning
-                BOOST_FOREACH(int64_t nOffset, vSorted)
-                    if (nOffset != 0 && abs64(nOffset) < 5 * 60)
-                        fMatch = true;
-
-                if (!fMatch)
-                {
-                    fDone = true;
-                    string strMessage("Warning: Please check that your computer's date and time are correct! If your clock is wrong 42 will not work properly.");
-                    strMiscWarning = strMessage;
-                    printf("*** %s\n", strMessage.c_str());
-                    uiInterface.ThreadSafeMessageBox(strMessage+" ", string("42"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION);
-                }
-            }
-        }
-        if (fDebug) {
-            BOOST_FOREACH(int64_t n, vSorted)
-                printf("%+" PRId64 "  ", n);
-            printf("|  ");
-        }
-        if (nNodesOffset != INT64_MAX)
-            printf("nNodesOffset = %+" PRId64 "  (%+" PRId64 " minutes)\n", nNodesOffset, nNodesOffset/60);
-    }
 }
 
 string FormatVersion(int nVersion)
@@ -1409,7 +1225,16 @@ std::string FormatSubVersion(const std::string& name, int nClientVersion, const 
     ss << "/";
     ss << name << ":" << FormatVersion(nClientVersion);
     if (!comments.empty())
-        ss << "(" << boost::algorithm::join(comments, "; ") << ")";
+    {
+        ss << "(";
+        for (const auto& st : comments)
+        {
+            ss << st;
+            if (st == comments.back()) break;
+            ss << "; ";
+        }
+        ss << ")";
+    }
     ss << "/";
     return ss.str();
 }
@@ -1445,7 +1270,6 @@ void RenameThread(const char* name)
     ::prctl(PR_SET_NAME, name, 0, 0, 0);
 #elif (defined(__FreeBSD__) || defined(__OpenBSD__))
     pthread_set_name_np(pthread_self(), name);
-
 #elif defined(__APPLE__)
     pthread_setname_np(name);
 #else

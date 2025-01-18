@@ -6,7 +6,6 @@
 #include "alert.h"
 #include "wallet.h"
 #include "db.h"
-#include "walletdb.h"
 #include "net.h"
 #include "ntp.h"
 
@@ -30,7 +29,7 @@ static void CopyNodeStats(std::vector<CNodeStats>& vstats)
 
     LOCK(cs_vNodes);
     vstats.reserve(vNodes.size());
-    BOOST_FOREACH(CNode* pnode, vNodes) {
+    for (CNode* pnode : vNodes) {
         CNodeStats stats;
         pnode->copyStats(stats);
         vstats.push_back(stats);
@@ -62,7 +61,7 @@ Value getaddrmaninfo(const Array& params, bool fHelp)
         strFilterNetType = params[0].get_str();
 
     Array ret;
-    BOOST_FOREACH(const CAddrInfo &addr, vAddr) {
+    for (const CAddrInfo &addr : vAddr) {
         if (!addr.IsRoutable() || addr.IsLocal())
             continue;
 
@@ -112,7 +111,7 @@ Value getpeerinfo(const Array& params, bool fHelp)
 
     Array ret;
 
-    BOOST_FOREACH(const CNodeStats& stats, vstats) {
+    for (const CNodeStats& stats : vstats) {
         Object obj;
 
         obj.push_back(Pair("addr", stats.addrName));
@@ -194,14 +193,14 @@ Value getaddednodeinfo(const Array& params, bool fHelp)
     if (params.size() == 1)
     {
         LOCK(cs_vAddedNodes);
-        BOOST_FOREACH(string& strAddNode, vAddedNodes)
+        for (string& strAddNode : vAddedNodes)
             laddedNodes.push_back(strAddNode);
     }
     else
     {
         string strNode = params[1].get_str();
         LOCK(cs_vAddedNodes);
-        BOOST_FOREACH(string& strAddNode, vAddedNodes)
+        for (string& strAddNode : vAddedNodes)
             if (strAddNode == strNode)
             {
                 laddedNodes.push_back(strAddNode);
@@ -214,7 +213,7 @@ Value getaddednodeinfo(const Array& params, bool fHelp)
         if (!fDns)
         {
             Object ret;
-            BOOST_FOREACH(string& strAddNode, laddedNodes)
+            for (string& strAddNode : laddedNodes)
                 ret.push_back(Pair("addednode", strAddNode));
             return ret;
         }
@@ -222,7 +221,7 @@ Value getaddednodeinfo(const Array& params, bool fHelp)
         Array ret;
 
         list<pair<string, vector<CService> > > laddedAddreses(0);
-        BOOST_FOREACH(string& strAddNode, laddedNodes)
+        for (string& strAddNode : laddedNodes)
         {
             vector<CService> vservNode(0);
             if(Lookup(strAddNode.c_str(), vservNode, GetDefaultPort(), fNameLookup, 0))
@@ -245,12 +244,12 @@ Value getaddednodeinfo(const Array& params, bool fHelp)
 
         Array addresses;
         bool fConnected = false;
-        BOOST_FOREACH(CService& addrNode, it->second)
+        for (CService& addrNode : it->second)
         {
             bool fFound = false;
             Object node;
             node.push_back(Pair("address", addrNode.ToString()));
-            BOOST_FOREACH(CNode* pnode, vNodes)
+            for (CNode* pnode : vNodes)
                 if (pnode->addr == addrNode)
                 {
                     fFound = true;
@@ -316,7 +315,7 @@ Value sendalert(const Array& params, bool fHelp)
     // Relay alert
     {
         LOCK(cs_vNodes);
-        BOOST_FOREACH(CNode* pnode, vNodes)
+        for (CNode* pnode : vNodes)
             alert.RelayTo(pnode);
     }
 

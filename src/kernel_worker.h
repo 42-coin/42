@@ -1,7 +1,12 @@
-#ifndef NOVACOIN_KERNELWORKER_H
-#define NOVACOIN_KERNELWORKER_H
+#ifndef KERNELWORKER_H
+#define KERNELWORKER_H
 
+#include "bignum.h"
+
+#include <cstdint>
 #include <vector>
+
+class uint256;
 
 class KernelWorker
 {
@@ -33,4 +38,4 @@ private:
 // Scan given kernel for solutions
 bool ScanKernelBackward(unsigned char *kernel, uint32_t nBits, uint32_t nInputTxTime, int64_t nValueIn, std::pair<uint32_t, uint32_t> &SearchInterval, std::pair<uint256, uint32_t> &solution);
 
-#endif // NOVACOIN_KERNELWORKER_H
+#endif // KERNELWORKER_H

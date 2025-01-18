@@ -7,8 +7,10 @@
 
 #include "crypter.h"
 #include "sync.h"
+
 #include <boost/signals2/signal.hpp>
-#include <boost/variant.hpp>
+
+#include <variant>
 
 class CScript;
 
@@ -25,7 +27,7 @@ public:
   *
   * A CTxDestination is the internal data type encoded in a CBitcoinAddress.
   */
-typedef boost::variant<CNoDestination, CKeyID, CScriptID> CTxDestination;
+using CTxDestination = std::variant<CNoDestination, CKeyID, CScriptID>;
 
 /** A virtual base class for key stores */
 class CKeyStore

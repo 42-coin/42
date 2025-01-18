@@ -28,10 +28,8 @@
  * Of course all fields are in network format.
  */
 
-#include <stdio.h>
 #include <inttypes.h>
 #include <limits>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #ifdef WIN32
@@ -39,14 +37,9 @@
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <netdb.h>
 #endif
-#ifndef WIN32
-#include <unistd.h>
-#endif
 #include <time.h>
-#include <errno.h>
 
 #include "ministun.h"
 #include "netbase.h"
@@ -1096,6 +1089,7 @@ static int StunRequest2(int sock, struct sockaddr_in *server, struct sockaddr_in
     unsigned char reply_buf[1024];
     fd_set rfds;
     struct timeval to = { STUN_TIMEOUT, 0 };
+    struct sockaddr_in src;
 #ifdef WIN32
     int srclen;
 #else
@@ -1110,7 +1104,7 @@ static int StunRequest2(int sock, struct sockaddr_in *server, struct sockaddr_in
     res = select(sock + 1, &rfds, NULL, NULL, &to);
     if (res <= 0)  /* timeout or error */
         return -11;
-    struct sockaddr_in src = {};
+    memset(&src, 0, sizeof(src));
     srclen = sizeof(src);
     /* XXX pass -1 in the size, because stun_handle_packet might
    * write past the end of the buffer.
@@ -1119,6 +1113,7 @@ static int StunRequest2(int sock, struct sockaddr_in *server, struct sockaddr_in
                    0, (struct sockaddr *)&src, &srclen);
     if (res <= 0)
         return -12;
+    memset(mapped, 0, sizeof(struct sockaddr_in));
     return stun_handle_packet(sock, &src, reply_buf, res, stun_get_mapped, mapped);
 } // StunRequest2
 
@@ -1129,15 +1124,18 @@ static int StunRequest(const char *host, uint16_t port, struct sockaddr_in *mapp
         return -1;
 
     SOCKET sock = INVALID_SOCKET;
+    struct sockaddr_in server, client;
+    memset(&server, 0, sizeof(server));
+    memset(&client, 0, sizeof(client));
+    server.sin_family = client.sin_family = AF_INET;
+
+    server.sin_addr = *(struct in_addr*) hostinfo->h_addr;
+    server.sin_port = htons(port);
+
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock == INVALID_SOCKET)
         return -2;
 
-    struct sockaddr_in server = {}, client = {};
-
-    server.sin_family = client.sin_family = AF_INET;
-    server.sin_addr = *(struct in_addr*) hostinfo->h_addr;
-    server.sin_port = htons(port);
     client.sin_addr.s_addr = htonl(INADDR_ANY);
 
     int rc = -3;
@@ -1155,18 +1153,12 @@ static int StunRequest(const char *host, uint16_t port, struct sockaddr_in *mapp
 
 int GetExternalIPbySTUN(uint64_t rnd, struct sockaddr_in *mapped, const char **srv) {
     randfiller    = rnd;
-    uint16_t pos  = rnd >> 16;
-    uint16_t step, a, b, t; 
-    // Select step relative prime to StunSrvListQty using Euclid algorithm
+    uint16_t pos  = rnd;
+    uint16_t step;
     do {
-       a = step = ++rnd;
-       b = StunSrvListQty;
-       do {
-           t = b;
-           b = a % b;
-           a = t;
-       } while(b != 0);
-  } while(a != 1);
+        rnd = (rnd >> 8) | 0xff00000000000000LL;
+        step = rnd % StunSrvListQty;
+    } while(step == 0);
 
     uint16_t attempt;
     for(attempt = 1; attempt < StunSrvListQty * 2; attempt++) {

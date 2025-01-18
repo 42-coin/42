@@ -4,16 +4,13 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "main.h"
 #include "db.h"
-#include "txdb.h"
+#include "txdb-leveldb.h"
 #include "init.h"
 #include "miner.h"
 #include "kernel.h"
 #include "bitcoinrpc.h"
-
-#include <boost/format.hpp>
-#include <boost/assign/list_of.hpp>
+#include "wallet.h"
 
 using namespace json_spirit;
 using namespace std;
@@ -83,7 +80,7 @@ Value scaninput(const Array& params, bool fHelp)
             "    days - time window, 90 days by default.\n"
         );
 
-    RPCTypeCheck(params, boost::assign::list_of(obj_type));
+    RPCTypeCheck(params, { obj_type });
 
     Object scanParams = params[0].get_obj();
 
@@ -133,13 +130,13 @@ Value scaninput(const Array& params, bool fHelp)
         if (inputs_v.type() == array_type)
         {
             Array inputs = inputs_v.get_array();
-            BOOST_FOREACH(const Value &v_out, inputs)
+            for (const Value &v_out : inputs)
             {
                 int nOut = v_out.get_int();
                 if (nOut < 0 || nOut > (int)tx.vout.size() - 1)
                 {
                     stringstream strErrorMsg;
-                    strErrorMsg << boost::format("Invalid parameter, input number %d is out of range") % nOut;
+                    strErrorMsg << "Invalid parameter, input number " << to_string(nOut) << " is out of range";
                     throw JSONRPCError(RPC_INVALID_PARAMETER, strErrorMsg.str());
                 }
 
@@ -152,7 +149,7 @@ Value scaninput(const Array& params, bool fHelp)
             if (nOut < 0 || nOut > (int)tx.vout.size() - 1)
             {
                 stringstream strErrorMsg;
-                strErrorMsg << boost::format("Invalid parameter, input number %d is out of range") % nOut;
+                strErrorMsg << "Invalid parameter, input number " << to_string(nOut) << " is out of range";
                 throw JSONRPCError(RPC_INVALID_PARAMETER, strErrorMsg.str());
             }
 
@@ -188,7 +185,7 @@ Value scaninput(const Array& params, bool fHelp)
         interval.second = interval.first + nDays * nOneDay;
 
         Array results;
-        BOOST_FOREACH(const int &nOut, vInputs)
+        for (const int &nOut : vInputs)
         {
             // Check for spent flag
             // It doesn't make sense to scan spent inputs.
@@ -208,7 +205,7 @@ Value scaninput(const Array& params, bool fHelp)
             std::vector<std::pair<uint256, uint32_t> > result;
             if (ScanKernelForward((unsigned char *)&itK[0], nBits, tx.nTime, tx.vout[nOut].nValue, interval, result))
             {
-                BOOST_FOREACH(const PAIRTYPE(uint256, uint32_t) solution, result)
+                for (const auto &solution : result)
                 {
                     Object item;
                     item.push_back(Pair("nout", nOut));
@@ -307,7 +304,7 @@ Value getworkex(const Array& params, bool fHelp)
 
         Array merkle_arr;
 
-        BOOST_FOREACH(uint256 merkleh, merkle) {
+        for (uint256 merkleh : merkle) {
             merkle_arr.push_back(HexStr(BEGIN(merkleh), END(merkleh)));
         }
 
@@ -550,7 +547,7 @@ Value getblocktemplate(const Array& params, bool fHelp)
     map<uint256, int64_t> setTxIndex;
     int i = 0;
     CTxDB txdb("r");
-    BOOST_FOREACH (CTransaction& tx, pblock->vtx)
+    for (CTransaction& tx : pblock->vtx)
     {
         uint256 txHash = tx.GetHash();
         setTxIndex[txHash] = i++;
@@ -574,7 +571,7 @@ Value getblocktemplate(const Array& params, bool fHelp)
             entry.push_back(Pair("fee", (int64_t)(tx.GetValueIn(mapInputs) - tx.GetValueOut())));
 
             Array deps;
-            BOOST_FOREACH (MapPrevTx::value_type& inp, mapInputs)
+            for (MapPrevTx::value_type& inp : mapInputs)
             {
                 if (setTxIndex.count(inp.first))
                     deps.push_back(setTxIndex[inp.first]);
@@ -646,3 +643,4 @@ Value submitblock(const Array& params, bool fHelp)
 
     return Value::null;
 }
+
