@@ -1,4 +1,4 @@
-IDI_ICON1 ICON DISCARDABLE "icons/42.ico"
+IDI_ICON1 ICON DISCARDABLE "${CMAKE_CURRENT_SOURCE_DIR}/src/qt/res/icons/42.ico"
 
 #include <windows.h>             // needed for VERSIONINFO
 #include "../../clientversion.h" // holds the needed client version information
