@@ -13,7 +13,7 @@ git clone -b 5.15 https://github.com/qt/qttranslations.git ${ROOT}/qttranslation
 git clone -b 5.15 https://github.com/qt/qtdeclarative.git ${ROOT}/qtdeclarative
 
 cd ${ROOT}/qtbase
-patch -s -p1 < ${ROOT}/stack_protector.patch
+patch -s -p1 < ${ROOT}/42/dependencies/qt/stack_protector.patch
 cd ${ROOT}/qtdeclarative
-patch -s -p1 < ${ROOT}/scenegraph.patch
+patch -s -p1 < ${ROOT}/42/dependencies/qt/scenegraph.patch
 cd ${ROOT}
