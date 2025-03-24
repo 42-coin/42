@@ -1,0 +1,49 @@
+# Building GUI and headless client for Ubuntu Linux
+
+## Preparations
+
+First step, install all dependencies:
+
+ sudo apt install build-essential libdb++-dev libssl-dev cmake qtdeclarative5-dev qttools5-dev libboost-all-dev libpng-dev git
+
+Then, clone repository recursively:
+
+ git clone --recursive https://github.com/42-coin/42
+
+## Building GUI client
+
+Create build directory:
+
+ mkdir 42/build_qt && cd 42/build_qt
+
+Configure build files:
+
+ cmake ..
+
+Compile:
+
+ make -j 4
+
+After everything will be done the resulting 42-qt executable will be created in your build directory.
+
+## Building headless client
+
+It's almost identical to steps for GUI client.
+
+ cd ..
+
+Create build directory:
+
+ mkdir src/build_d && cd src/build_d
+
+Configure build files:
+
+ cmake ..
+
+Compile:
+
+ make -j 4
+
+ strip 42d
+	
+The resulting 42d executable will be created in the build directory.
