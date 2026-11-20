@@ -1,4 +1,4 @@
-[![42-256.png](https://i.imgur.com/mWOY6Z5.png)](https://tr.im/42coin)
+[![42-256.png](https://i.imgur.com/Puz7qbV.png)](https://t.me/chat42coin)
 
 
 42-coin - a PoW/PoS based cryptocurrency.
