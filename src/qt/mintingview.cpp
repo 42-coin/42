@@ -6,6 +6,8 @@
 #include "guiconstants.h"
 #include "guiutil.h"
 #include "csvmodelwriter.h"
+#include "kernel.h"
+#include "timedata.h"
 
 
 #include <QHBoxLayout>
@@ -168,7 +170,7 @@ void MintingView::exportClicked()
     writer.addColumn(tr("Address"),MintingTableModel::Address,0);
     writer.addColumn(tr("Transaction"),MintingTableModel::TxHash,0);
     writer.addColumn(tr("Age"), MintingTableModel::Age,0);
-    writer.addColumn(tr("CoinDay"), MintingTableModel::CoinDay,0);
+    writer.addColumn(IsStakeWeightV2(GetAdjustedTime()) ? tr("CoinHour") : tr("CoinDay"), MintingTableModel::CoinDay,0);
     writer.addColumn(tr("Balance"), MintingTableModel::Balance,0);
     writer.addColumn(tr("MintingProbability"), MintingTableModel::MintProbability,0);
     

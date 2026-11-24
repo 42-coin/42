@@ -40,9 +40,16 @@ uint256 nPoWBase = uint256("0x00000000ffff00000000000000000000000000000000000000
 CBigNum bnProofOfWorkLimitTestNet(~uint256(0) >> 16);
 
 unsigned int nStakeMinAge = 42 * nOneHour; // 42 hours as zero time weight
+// v2 upgrade: coin-hour weight resolution makes any matured input participate
+// in staking, so a large zero-weight period is no longer needed
+unsigned int nStakeMinAgeV2 = nOneHour; // 1 hour as zero time weight after the v2 upgrade
 unsigned int nStakeMaxAge = INT_MAX; // 'unlimited' full weight
 unsigned int nStakeTargetSpacing = 7 * 60; // 7-minutes stakes spacing
 unsigned int nModifierInterval = 7 * 60; // time to elapse before new modifier is computed
+
+// v2 stake weight protocol switch, everyone must upgrade before this time.
+// Must be coordinated network-wide together with the release, 0 disables.
+unsigned int nStakeWeightV2Time = 1798761600; // Fri, 1 Jan 2027 00:00:00 GMT
 
 int nCoinbaseMaturity = 22;
 
@@ -572,8 +579,13 @@ int64_t CTransaction::GetMinFee(unsigned int nBlockSize, bool fAllowFree, enum G
     //
     // It's safe to ignore empty outputs here, because these inputs are allowed
     //     only for coinbase and coinstake transactions.
+    //
+    // In the v2 era the dust fee is skipped for coinstake outputs: fractional
+    // stakes below CENT must not be penalized, otherwise such coinstake is
+    // always rejected by the coinstake pays too much rule with zero reward.
+    bool fSkipStakeDustFee = IsCoinStake() && IsStakeWeightV2(nTime);
     for (const CTxOut& txout : vout)
-        if (txout.nValue < CENT && !txout.IsEmpty())
+        if (!fSkipStakeDustFee && txout.nValue < CENT && !txout.IsEmpty())
             nMinFee += nBaseFee;
 
     // Raise the price as the block approaches full
@@ -2647,6 +2659,8 @@ bool LoadBlockIndex(bool fAllowNew)
 
         bnProofOfWorkLimit = bnProofOfWorkLimitTestNet; // 16 bits PoW target limit for testnet
         nStakeMinAge = 1 * 60; // test net min age is 1 minute
+        nStakeMinAgeV2 = 1 * 60; // test net v2 min age is 1 minute
+        nStakeWeightV2Time = 1600000000; // always active on test net
         nModifierInterval = 42; // test modifier interval is 42 seconds
         nCoinbaseMaturity = 1; // test maturity is 1(21) block
         nStakeTargetSpacing = 42; // test block spacing is 42 seconds

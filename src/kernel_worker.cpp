@@ -19,9 +19,10 @@ void KernelWorker::Do_generic()
     SetThreadPriority(THREAD_PRIORITY_LOWEST);
 
     // Compute maximum possible target to filter out majority of obviously insufficient hashes
+    // It uses the most permissive weight unit (coin-hour), so it never skips valid solutions
     CBigNum bnTargetPerCoinDay;
     bnTargetPerCoinDay.SetCompact(nBits);
-    uint256 nMaxTarget = (bnTargetPerCoinDay * bnValueIn * nStakeMaxAge / COIN / nOneDay).getuint256();
+    uint256 nMaxTarget = (bnTargetPerCoinDay * bnValueIn * nStakeMaxAge / COIN / nOneHour).getuint256();
 
     SHA256_CTX ctx, workerCtx;
     // Init new sha256 context and update it
@@ -53,10 +54,11 @@ void KernelWorker::Do_generic()
         if (hashProofOfStake[7] > nMaxTarget32)
             continue;
 
-        CBigNum bnCoinDayWeight = bnValueIn * GetWeight((int64_t)nInputTxTime, (int64_t)nTimeTx) / COIN / nOneDay;
+        int64_t nWeightScale = GetStakeWeightScale(nTimeTx);
+        CBigNum bnCoinDayWeight = GetStakeWeightBN(bnValueIn, GetWeight((int64_t)nInputTxTime, (int64_t)nTimeTx), nTimeTx);
         CBigNum bnTargetProofOfStake = bnCoinDayWeight * bnTargetPerCoinDay;
 
-        if (bnTargetProofOfStake >= CBigNum(*pnHashProofOfStake))
+        if (bnTargetProofOfStake >= CBigNum(*pnHashProofOfStake) * nWeightScale)
             solutions.push_back(std::pair<uint256,uint32_t>(*pnHashProofOfStake, nTimeTx));
     }
 }
@@ -75,13 +77,14 @@ vector<pair<uint256,uint32_t> >& KernelWorker::GetSolutions()
 
 bool ScanKernelBackward(unsigned char *kernel, uint32_t nBits, uint32_t nInputTxTime, int64_t nValueIn, std::pair<uint32_t, uint32_t> &SearchInterval, std::pair<uint256, uint32_t> &solution)
 {
+    // Get maximum possible target to filter out the majority of obviously insufficient hashes
+    // It uses the most permissive weight unit (coin-hour), so it never skips valid solutions
     CBigNum bnTargetPerCoinDay;
     bnTargetPerCoinDay.SetCompact(nBits);
 
     CBigNum bnValueIn(nValueIn);
 
-    // Get maximum possible target to filter out the majority of obviously insufficient hashes
-    uint256 nMaxTarget = (bnTargetPerCoinDay * bnValueIn * nStakeMaxAge / COIN / nOneDay).getuint256();
+    uint256 nMaxTarget = (bnTargetPerCoinDay * bnValueIn * nStakeMaxAge / COIN / nOneHour).getuint256();
 
     SHA256_CTX ctx, workerCtx;
     // Init new sha256 context and update it
@@ -110,10 +113,11 @@ bool ScanKernelBackward(unsigned char *kernel, uint32_t nBits, uint32_t nInputTx
         if (hashProofOfStake > nMaxTarget)
             continue;
 
-        CBigNum bnCoinDayWeight = bnValueIn * GetWeight((int64_t)nInputTxTime, (int64_t)nTimeTx) / COIN / nOneDay;
+        int64_t nWeightScale = GetStakeWeightScale(nTimeTx);
+        CBigNum bnCoinDayWeight = GetStakeWeightBN(bnValueIn, GetWeight((int64_t)nInputTxTime, (int64_t)nTimeTx), nTimeTx);
         CBigNum bnTargetProofOfStake = bnCoinDayWeight * bnTargetPerCoinDay;
 
-        if (bnTargetProofOfStake >= CBigNum(hashProofOfStake))
+        if (bnTargetProofOfStake >= CBigNum(hashProofOfStake) * nWeightScale)
         {
             solution.first = hashProofOfStake;
             solution.second = nTimeTx;

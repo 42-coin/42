@@ -546,7 +546,8 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
 
         CoinsSet setCoins;
         int64_t nValueIn = 0;
-        if (!pwallet->SelectCoinsSimple(nBalance - nReserveBalance, MIN_TX_FEE, MAX_MONEY, nUpperTime, nCoinbaseMaturity * 10, setCoins, nValueIn))
+        int nStakeMinConf = IsStakeWeightV2(nUpperTime) ? nCoinbaseMaturity : nCoinbaseMaturity * 10;
+        if (!pwallet->SelectCoinsSimple(nBalance - nReserveBalance, MIN_TX_FEE, MAX_MONEY, nUpperTime, nStakeMinConf, setCoins, nValueIn))
             return error("FillMap() : SelectCoinsSimple failed");
 
         if (setCoins.empty())
@@ -582,7 +583,8 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
                 continue;
 
             // Only load coins meeting min age requirement
-            if (nStakeMinAge + block.nTime > nTime - nMaxStakeSearchInterval)
+            unsigned int nMinAge = IsStakeWeightV2(nTime) ? nStakeMinAgeV2 : nStakeMinAge;
+            if (nMinAge + block.nTime > nTime - nMaxStakeSearchInterval)
                 continue;
 
             // Get stake modifier

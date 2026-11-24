@@ -4,6 +4,8 @@
 #ifndef PPCOIN_KERNEL_H
 #define PPCOIN_KERNEL_H
 
+#include "bignum.h"
+
 class CBlock;
 class CBlockIndex;
 class CTransaction;
@@ -12,6 +14,25 @@ class uint256;
 
 extern unsigned int nStakeMaxAge;
 extern unsigned int nStakeMinAge;
+extern unsigned int nStakeMinAgeV2;
+
+// Protocol switch time of the v2 stake weight rules (coin-hour weight resolution
+// and reduced minimum age). 0 keeps the v1 rules forever.
+extern unsigned int nStakeWeightV2Time;
+
+inline bool IsStakeWeightV2(unsigned int nTimeTx)
+{
+    return nStakeWeightV2Time != 0 && nTimeTx >= nStakeWeightV2Time;
+}
+
+// Resolution of the v2 stake weight: one weight unit is 1/STAKE_WEIGHT_SCALE
+// of a coin-hour, removing the integer quantization of fractional stakes
+static const int64_t STAKE_WEIGHT_SCALE = 1000;
+
+inline int64_t GetStakeWeightScale(unsigned int nTimeTx)
+{
+    return IsStakeWeightV2(nTimeTx) ? STAKE_WEIGHT_SCALE : 1;
+}
 
 // ChainDB upgrade time
 extern unsigned int nModifierUpgradeTime;
@@ -44,6 +65,10 @@ bool ScanKernelForward(unsigned char *kernel, uint32_t nBits, uint32_t nInputTxT
 // Sets hashProofOfStake on success return
 bool CheckProofOfStake(const CTransaction& tx, unsigned int nBits, uint256& hashProofOfStake, uint256& targetProofOfStake);
 
+// Compute stake weight of an input in coin-day units (v1) or scaled coin-hour
+// units (v2, multiplied by STAKE_WEIGHT_SCALE)
+CBigNum GetStakeWeightBN(const CBigNum& bnValueIn, int64_t nTimeWeight, unsigned int nTimeTx);
+
 // Get stake modifier checksum
 uint32_t GetStakeModifierChecksum(const CBlockIndex* pindex);
 
@@ -51,15 +76,13 @@ uint32_t GetStakeModifierChecksum(const CBlockIndex* pindex);
 bool CheckStakeModifierCheckpoints(int nHeight, uint32_t nStakeModifierChecksum);
 
 // Get time weight using supplied timestamps
+// The weight rules follow the v2 protocol switch depending on nIntervalEnd
+// (kernel timestamp), so nodes agree on the rules without extra context
 inline int64_t GetWeight(int64_t nIntervalBeginning, int64_t nIntervalEnd)
 {
-    // Kernel hash weight starts from 0 at the 30-day min age
-    // this change increases active coins participating the hash and helps
-    // to secure the network when proof-of-stake difficulty is low
-    //
-    // Maximum TimeWeight is 90 days.
+    int64_t nMinAge = IsStakeWeightV2((unsigned int)nIntervalEnd) ? nStakeMinAgeV2 : nStakeMinAge;
 
-    return std::min(nIntervalEnd - nIntervalBeginning - nStakeMinAge, (int64_t)nStakeMaxAge);
+    return std::min(nIntervalEnd - nIntervalBeginning - nMinAge, (int64_t)nStakeMaxAge);
 }
 
 #endif // PPCOIN_KERNEL_H

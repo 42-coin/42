@@ -1,6 +1,7 @@
 #include "kernelrecord.h"
 
 #include "wallet.h"
+#include "kernel.h"
 #include "base58.h"
 
 using namespace std;
@@ -72,19 +73,23 @@ int64_t KernelRecord::getAge() const
 
 uint64_t KernelRecord::getCoinDay() const
 {
-    int64_t nWeight = GetAdjustedTime() - nTime - nStakeMinAge;
+    bool fStakeWeightV2 = IsStakeWeightV2(GetAdjustedTime());
+    int64_t nMinAge = fStakeWeightV2 ? nStakeMinAgeV2 : nStakeMinAge;
+    int64_t nUnit = fStakeWeightV2 ? nOneHour : nOneDay;
+    int64_t nWeight = GetAdjustedTime() - nTime - nMinAge;
     if( nWeight <  0)
         return 0;
     nWeight = min(nWeight, (int64_t)nStakeMaxAge);
-    uint64_t coinAge = (nValue * nWeight ) / (COIN * nOneDay);
+    uint64_t coinAge = (nValue * nWeight ) / (COIN * nUnit);
     return coinAge;
 }
 
 int64_t KernelRecord::getPoSReward(int minutes)
 {
     int64_t PoSReward;
+    int64_t nMinAge = IsStakeWeightV2(GetAdjustedTime()) ? nStakeMinAgeV2 : nStakeMinAge;
     int64_t nWeight = GetAdjustedTime() - nTime + minutes * 60;
-    if( nWeight <  nStakeMinAge)
+    if( nWeight <  nMinAge)
         return 0;
     uint64_t coinAge = (nValue * nWeight ) / (COIN * nOneDay);
     PoSReward = GetProofOfStakeReward(coinAge);
@@ -98,9 +103,12 @@ double KernelRecord::getProbToMintStake(double difficulty, int timeOffset) const
     //int dayWeight = (min((GetAdjustedTime() - nTime) + timeOffset, (int64_t)(nStakeMinAge+nStakeMaxAge)) - nStakeMinAge) / 86400;
     //uint64_t coinAge = max(nValue * dayWeight / COIN, (int64_t)0);
     //return target * coinAge / pow(static_cast<double>(2), 256);
-    int64_t Weight = (min((GetAdjustedTime() - nTime) + timeOffset, (int64_t)(nStakeMinAge+nStakeMaxAge)) - nStakeMinAge);
+    bool fStakeWeightV2 = IsStakeWeightV2(GetAdjustedTime() + timeOffset);
+    int64_t nMinAge = fStakeWeightV2 ? nStakeMinAgeV2 : nStakeMinAge;
+    double dScale = fStakeWeightV2 ? (double)(nOneDay / nOneHour) : 1.0; // coin-hour weight owns the coin-day target 24 times more often
+    int64_t Weight = (min((GetAdjustedTime() - nTime) + timeOffset, (int64_t)(nMinAge+nStakeMaxAge)) - nMinAge);
     uint64_t coinAge = max(nValue * Weight / (COIN * nOneDay), (int64_t)0);
-    return coinAge / (pow(static_cast<double>(2),32) * difficulty);
+    return coinAge / (pow(static_cast<double>(2),32) * difficulty) * dScale;
 }
 
 double KernelRecord::getProbToMintWithinNMinutes(double difficulty, int minutes)

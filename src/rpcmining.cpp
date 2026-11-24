@@ -65,6 +65,8 @@ Value getmininginfo(const Array& params, bool fHelp)
 
     obj.push_back(Pair("stakeinputs",   (uint64_t)nStakeInputsMapSize));
     obj.push_back(Pair("stakeinterest", (uint64_t)COIN_YEAR_REWARD));
+    obj.push_back(Pair("stakeweightv2time", (uint64_t)nStakeWeightV2Time));
+    obj.push_back(Pair("stakeweightv2active", IsStakeWeightV2((unsigned int)GetAdjustedTime())));
     obj.push_back(Pair("testnet",       fTestNet));
     return obj;
 }
@@ -180,8 +182,9 @@ Value scaninput(const Array& params, bool fHelp)
         std::pair<uint32_t, uint32_t> interval;
         interval.first = GetTime();
         // Only count coins meeting min age requirement
-        if (nStakeMinAge + block.nTime > interval.first)
-            interval.first += (nStakeMinAge + block.nTime - interval.first);
+        unsigned int nMinAge = IsStakeWeightV2((unsigned int)interval.first) ? nStakeMinAgeV2 : nStakeMinAge;
+        if (nMinAge + block.nTime > interval.first)
+            interval.first += (nMinAge + block.nTime - interval.first);
         interval.second = interval.first + nDays * nOneDay;
 
         Array results;

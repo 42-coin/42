@@ -2192,8 +2192,8 @@ void CWallet::GetStakeWeightFromValue(const int64_t& nTime, const int64_t& nValu
         return;
     }
 
-    CBigNum bnCoinDayWeight = CBigNum(nValue) * nTimeWeight / COIN / nOneDay;
-    nWeight = bnCoinDayWeight.getuint64();
+    CBigNum bnStakeWeight = GetStakeWeightBN(CBigNum(nValue), nTimeWeight, GetTime()) / GetStakeWeightScale(GetTime());
+    nWeight = bnStakeWeight.getuint64();
 }
 
 bool CWallet::MergeCoins(const int64_t& nAmount, const int64_t& nMinValue, const int64_t& nOutputValue, std::list<uint256>& listMerged)
@@ -2471,6 +2471,13 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
         // Set output amount
         if (fDontSplitCoins)
             txNew.vout[1].nValue = nCredit - nMinFee;
+        else if (nCredit - nMinFee < 2 * CENT)
+        {
+            // Not enough credit for two non-dust outputs, mint as a single output
+            fDontSplitCoins = true;
+            txNew.vout.resize(2);
+            txNew.vout[1].nValue = nCredit - nMinFee;
+        }
         else
         {
             txNew.vout[1].nValue = ((nCredit - nMinFee) / 2 / CENT) * CENT;

@@ -437,6 +437,8 @@ QVariant MintingTableModel::headerData(int section, Qt::Orientation orientation,
     {
         if(role == Qt::DisplayRole)
         {
+            if(section == CoinDay)
+                return IsStakeWeightV2(GetAdjustedTime()) ? tr("CoinHour") : tr("CoinDay");
             return columns[section];
         }
         else if (role == Qt::TextAlignmentRole)

@@ -26,6 +26,13 @@ unsigned int nModifierUpgradeTime = 0;
 
 typedef std::map<int, unsigned int> MapModifierCheckpoints;
 
+CBigNum GetStakeWeightBN(const CBigNum& bnValueIn, int64_t nTimeWeight, unsigned int nTimeTx)
+{
+    if (IsStakeWeightV2(nTimeTx))
+        return bnValueIn * nTimeWeight * STAKE_WEIGHT_SCALE / COIN / nOneHour; // coin-hour resolution, scaled
+    return bnValueIn * nTimeWeight / COIN / nOneDay;      // coin-day resolution
+}
+
 // Hard checkpoints of stake modifiers to ensure they are deterministic
 static std::map<int, unsigned int> mapStakeModifierCheckpoints =
     {
@@ -327,8 +334,10 @@ bool CheckStakeKernelHash(uint32_t nBits, const CBlock& blockFrom, uint32_t nTxP
     if (nTimeTx < txPrev.nTime)  // Transaction timestamp violation
         return error("CheckStakeKernelHash() : nTime violation");
 
+    unsigned int nMinAge = IsStakeWeightV2(nTimeTx) ? nStakeMinAgeV2 : nStakeMinAge;
+
     uint32_t nTimeBlockFrom = blockFrom.GetBlockTime();
-    if (nTimeBlockFrom + nStakeMinAge > nTimeTx) // Min age requirement
+    if (nTimeBlockFrom + nMinAge > nTimeTx) // Min age requirement
         return error("CheckStakeKernelHash() : min age violation");
 
     CBigNum bnTargetPerCoinDay;
@@ -337,8 +346,16 @@ bool CheckStakeKernelHash(uint32_t nBits, const CBlock& blockFrom, uint32_t nTxP
 
     uint256 hashBlockFrom = blockFrom.GetHash();
 
-    CBigNum bnCoinDayWeight = CBigNum(nValueIn) * GetWeight((int64_t)txPrev.nTime, (int64_t)nTimeTx) / COIN / nOneDay;
-    targetProofOfStake = (bnCoinDayWeight * bnTargetPerCoinDay).getuint256();
+    int64_t nWeightScale = GetStakeWeightScale(nTimeTx);
+
+    CBigNum bnCoinDayWeight = GetStakeWeightBN(CBigNum(nValueIn), GetWeight((int64_t)txPrev.nTime, (int64_t)nTimeTx), nTimeTx);
+    CBigNum bnStakeTarget = bnCoinDayWeight * bnTargetPerCoinDay;
+
+    CBigNum bnMaxTarget(~uint256(0));
+    CBigNum bnExactTarget = bnStakeTarget / nWeightScale;
+    if (bnExactTarget > bnMaxTarget)
+        bnExactTarget = bnMaxTarget;
+    targetProofOfStake = bnExactTarget.getuint256();
 
     // Calculate hash
     CDataStream ss(SER_GETHASH, 0);
@@ -366,7 +383,7 @@ bool CheckStakeKernelHash(uint32_t nBits, const CBlock& blockFrom, uint32_t nTxP
     }
 
     // Now check if proof-of-stake hash meets target protocol
-    if (CBigNum(hashProofOfStake) > bnCoinDayWeight * bnTargetPerCoinDay)
+    if (CBigNum(hashProofOfStake) * nWeightScale > bnStakeTarget)
         return false;
     if (fDebug && !fPrintProofOfStake)
     {

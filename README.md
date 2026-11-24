@@ -15,11 +15,32 @@ Specifications
 - PoW reward: 0 coin + tx fees
 - PoW target spacing: 21 minutes
 - PoS reward: 0 coin & destroy tx fees (for deflation)
-- Min stake age: 42 hours
+- Min stake age: 42 hours (1 hour in the stake weight v2 era)
 - Max stake age: unlimited
 - PoS target spacing: 7 minutes
 - Default Listen Port: 4242 (42420 for testnet)
 - JSON-RPC Port: 2121 (21210 for testnet)
+
+
+Stake weight v2
+---------------
+
+Stake weight v2 activates at a fixed activation time
+(`nStakeWeightV2Time`, January 1 2027 UTC on mainnet; always active on
+testnet). Before activation the original coin-day rules apply
+unchanged.
+
+- Stake weight is accumulated in coin-hours instead of whole
+  coin-days, with 1/1000 coin-hour resolution, so inputs younger than
+  1 coin-day take part in PoS block generation.
+- Min stake age: 1 hour (instead of 42 hours).
+- Stake miner candidates are accepted from 22 confirmations (instead
+  of 220).
+- Coinstake outputs are exempt from the dust fee and the wallet does
+  not split coinstake credit below 2 * CENT, so inputs as small as 1
+  satoshi can stake at sufficient accumulated weight.
+- `getmininginfo` reports `stakeweightv2time` and
+  `stakeweightv2active`.
 
 
 Intro
