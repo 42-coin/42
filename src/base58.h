@@ -147,6 +147,7 @@ public:
     bool GetKey(CFalconKey& keyOut) const;
     bool IsValid() const;
     unsigned char GetVersion() const { return nVersion; }
+    size_t GetDataSize() const { return vchData.size(); }
     bool SetString(const char* pszSecret);
     bool SetString(const std::string& strSecret);
 

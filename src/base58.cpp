@@ -545,17 +545,24 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
     {
         assert(key.IsValid());
         SetData(128 + (fTestNet ? CBitcoinAddress::SCRIPT_ADDRESS_FALCON_TEST : CBitcoinAddress::SCRIPT_ADDRESS_FALCON), &key.GetPubKey()[0], key.GetPubKey().size());
-        vchData.insert(vchData.end(), key.GetPrivKey().begin(), key.GetPrivKey().end());
+        // GetPrivKey() returns the private key BY VALUE; binding a copy prevents
+        // dangling begin/end iterators (two distinct temporaries in one insert
+        // call is undefined behaviour - it broke dumpfalconkey).
+        CFalconPrivKey privKey = key.GetPrivKey();
+        vchData.insert(vchData.end(), privKey.begin(), privKey.end());
     }
 
     bool CBitcoinFalconKey::GetKey(CFalconKey& keyOut) const
     {
         if (!IsValid() || vchData.size() != FALCON512_PUBKEY_SIZE + FALCON512_PRIVKEY_SIZE)
             return false;
+        // SetPubKey must come before SetPrivKey: SetPrivKey returns fSet,
+        // which requires a non-empty public key (same pitfall as in
+        // CCryptoKeyStore::GetFalconKey).
+        keyOut.SetPubKey(std::vector<unsigned char>(vchData.begin(), vchData.begin() + FALCON512_PUBKEY_SIZE));
         CFalconPrivKey vchPrivKey(vchData.begin() + FALCON512_PUBKEY_SIZE, vchData.end());
         if (!keyOut.SetPrivKey(vchPrivKey))
             return false;
-        keyOut.SetPubKey(std::vector<unsigned char>(vchData.begin(), vchData.begin() + FALCON512_PUBKEY_SIZE));
         return keyOut.IsValid();
     }
 

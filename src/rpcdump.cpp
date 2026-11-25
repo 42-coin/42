@@ -114,12 +114,23 @@ Value importfalconkey(const Array& params, bool fHelp)
 
     CBitcoinFalconKey falconSecret;
     if (!falconSecret.SetString(strSecret))
+    {
+        unsigned int nExpectedDataSize = FALCON512_PUBKEY_SIZE + FALCON512_PRIVKEY_SIZE;
+        std::string strDetail;
+        if (falconSecret.GetVersion() == 0)
+            strDetail = "invalid base58 or broken checksum";
+        else if (falconSecret.GetDataSize() != nExpectedDataSize)
+            strDetail = strprintf("decoded %d bytes, expected %d - the key is truncated or contains extra characters",
+                                  (int)falconSecret.GetDataSize(), (int)nExpectedDataSize);
+        else
+            strDetail = "key does not pass validation";
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
-            strprintf("Invalid falcon key encoding (decoded version byte %d, this wallet expects %d; "
-                      "version 0 means invalid base58 or broken checksum - check the key was copied in full, "
-                      "without spaces or line breaks)",
+            strprintf("Invalid falcon key encoding (decoded version byte %d, this wallet expects %d; %s - "
+                      "check the key was copied in full, without spaces or line breaks)",
                       falconSecret.GetVersion(),
-                      128 + (fTestNet ? CBitcoinAddress::SCRIPT_ADDRESS_FALCON_TEST : CBitcoinAddress::SCRIPT_ADDRESS_FALCON)));
+                      128 + (fTestNet ? CBitcoinAddress::SCRIPT_ADDRESS_FALCON_TEST : CBitcoinAddress::SCRIPT_ADDRESS_FALCON),
+                      strDetail.c_str()));
+    }
 
     CFalconKey keyFalcon;
     if (!falconSecret.GetKey(keyFalcon) || !keyFalcon.IsValid())
