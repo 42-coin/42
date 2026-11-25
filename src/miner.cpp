@@ -704,6 +704,11 @@ void ThreadStakeMiner(void* parg)
     bool fTrySync = true;
     uint32_t nLastEmptyRefill = 0; // last periodic refill attempt (empty map)
 
+    // Isolated/quiet test networks: allow the staker to run with zero peers
+    // once the chain is synced (not in IBD). Default off - normally we stake
+    // only with connections, to avoid private forks drifting from the network.
+    bool fStakeWithNoPeers = GetBoolArg("-stakewithnopeers", false);
+
     CBlockIndex* pindexPrev = pindexBest;
     uint32_t nBits = GetNextTargetRequired(pindexPrev, true);
 
@@ -729,7 +734,7 @@ void ThreadStakeMiner(void* parg)
                     goto _endloop; // Don't be afraid to use a goto if that's the best option.
             }
 
-            while (vNodes.empty() || IsInitialBlockDownload())
+            while ((vNodes.empty() && !fStakeWithNoPeers) || IsInitialBlockDownload())
             {
                 fTrySync = true;
 
