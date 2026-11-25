@@ -212,6 +212,106 @@ bool CWallet::LoadCScript(const CScript& redeemScript)
     return CCryptoKeyStore::AddCScript(redeemScript);
 }
 
+bool CWallet::AddFalconKey(const CFalconKey& key, const CBitcoinAddress& address)
+{
+    if (!CCryptoKeyStore::AddFalconKey(key))
+        return error("CWallet::AddFalconKey() : AddFalconKey failed");
+    if (!fFileBacked)
+        return true;
+    if (!CWalletDB(strWalletFile).WriteFalconKey(key))
+        return error("CWallet::AddFalconKey() : WriteFalconKey failed");
+    SetAddressBookName(address, "");
+    return true;
+}
+
+bool CWallet::GenerateNewFalconKey(CFalconKey& keyOut, CBitcoinAddress& addressOut)
+{
+    if (!keyOut.MakeNewKey())
+        return error("CWallet::GenerateNewFalconKey() : OQS key generation failed");
+
+    CScript scriptRedeem = BuildFalconRedeemScript(keyOut.GetID());
+    if (!AddCScript(scriptRedeem))
+        return error("CWallet::GenerateNewFalconKey() : AddCScript failed");
+
+    addressOut.SetFalconScriptID(scriptRedeem.GetID());
+    return AddFalconKey(keyOut, addressOut);
+}
+
+bool CWallet::LoadCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret)
+{
+    SetMinVersion(FEATURE_WALLETCRYPT);
+    return CCryptoKeyStore::AddCryptedFalconKey(keyID, vchPubKey, vchCryptedSecret);
+}
+
+bool CWallet::AddCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret)
+{
+    if (!CCryptoKeyStore::AddCryptedFalconKey(keyID, vchPubKey, vchCryptedSecret))
+        return false;
+
+    if (!fFileBacked)
+        return true;
+    {
+        LOCK(cs_wallet);
+        if (pwalletdbEncryption)
+            return pwalletdbEncryption->WriteCryptedFalconKey(keyID, std::make_pair(vchPubKey, vchCryptedSecret));
+        else
+            return CWalletDB(strWalletFile).WriteCryptedFalconKey(keyID, std::make_pair(vchPubKey, vchCryptedSecret));
+    }
+    return false;
+}
+
+bool CWallet::GetFalconChangeScript(CScript& scriptChange)
+{
+    std::set<CFalconKeyID> setFalconKeys;
+    GetFalconKeys(setFalconKeys);
+
+    CFalconKeyID keyID;
+    if (setFalconKeys.empty())
+    {
+        CFalconKey keyNew;
+        CBitcoinAddress addressNew;
+        if (!GenerateNewFalconKey(keyNew, addressNew))
+            return false;
+        keyID = keyNew.GetID();
+    }
+    else
+        keyID = *setFalconKeys.begin();
+
+    CScript scriptRedeem = BuildFalconRedeemScript(keyID);
+    if (!HaveCScript(scriptRedeem.GetID()))
+        AddCScript(scriptRedeem);
+
+    scriptChange.SetDestination(CScriptID(scriptRedeem.GetID()));
+    return true;
+}
+
+int CWallet::IsFalconCoinVerbose(const CTxOut& txout) const
+{
+    if (!txout.scriptPubKey.IsPayToScriptHash())
+        return 1;
+
+    // P2SH words: OP_HASH160 (a9) OP_DATA20 (14) <20-byte hash> OP_EQUAL (87)
+    // so the hash starts at offset 2, not 3 (stake miners never saw falcon coins with +3)
+    uint160 scriptHash(std::vector<unsigned char>(txout.scriptPubKey.begin() + 2, txout.scriptPubKey.begin() + 22));
+    CScript subscript;
+    if (!GetCScript(CScriptID(scriptHash), subscript))
+        return 2;
+
+    CFalconKeyID keyID;
+    if (!IsStrictFalconScript(subscript, keyID))
+        return 3;
+
+    if (!HaveFalconKey(keyID))
+        return 4;
+
+    return 0;
+}
+
+bool CWallet::IsFalconCoin(const CTxOut& txout) const
+{
+    return IsFalconCoinVerbose(txout) == 0;
+}
+
 
 bool CWallet::AddWatchOnly(const CScript &dest)
 {
@@ -1273,6 +1373,7 @@ void CWalletTx::GetAmounts(int64_t& nGeneratedImmature, int64_t& nGeneratedMatur
                    this->GetHash().ToString().c_str());
             address = CBitcoinAddress();
         }
+        address = ResolveFalconScriptAddress(pwallet, address);
 
         // If we are debited by the transaction, add the output as a "sent" entry
         if (nDebit > 0)
@@ -1956,10 +2057,19 @@ bool CWallet::SelectCoinsMinConf(int64_t nTargetValue, unsigned int nSpendTime, 
     return true;
 }
 
-bool CWallet::SelectCoins(int64_t nTargetValue, unsigned int nSpendTime, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet, const CCoinControl* coinControl) const
+bool CWallet::SelectCoins(int64_t nTargetValue, unsigned int nSpendTime, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet, const CCoinControl* coinControl, bool fFalconOnly) const
 {
     std::vector<COutput> vCoins;
     AvailableCoins(vCoins, true, coinControl);
+
+    if (fFalconOnly)
+    {
+        std::vector<COutput> vCoinsFalcon;
+        for (const COutput& out : vCoins)
+            if (IsFalconCoin(out.tx->vout[out.i]))
+                vCoinsFalcon.push_back(out);
+        vCoins = vCoinsFalcon;
+    }
 
     // coin control -> return all selected outputs (we want all selected to go into the transaction for sure)
     if (coinControl && coinControl->HasSelected())
@@ -2009,7 +2119,7 @@ void CWallet::SetNull()
 }
 
 // Select some coins without random shuffle or best subset approximation
-bool CWallet::SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t nMaxValue, unsigned int nSpendTime, int nMinConf, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet) const
+bool CWallet::SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t nMaxValue, unsigned int nSpendTime, int nMinConf, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet, bool fFalconOnly) const
 {
     std::vector<COutput> vCoins;
     AvailableCoinsMinConf(vCoins, nMinConf, nMinValue, nMaxValue);
@@ -2017,16 +2127,40 @@ bool CWallet::SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t
     setCoinsRet.clear();
     nValueRet = 0;
 
+    // Diagnostics: why candidates were rejected (printed only when nothing is selected)
+    int nNotSpendable = 0, nNotFalcon = 0, nImmature = 0, nFutureTime = 0;
+    int nFalconStage[5] = {0, 0, 0, 0, 0}; // falcon-check failures by stage 1..4
+    std::string strFirstNonFalcon;         // hex of the first rejected scriptPubKey
+    std::map<uint160, std::pair<int, int64_t> > mapNonFalcon; // script hash -> (count, total value)
+
     for (COutput output : vCoins)
     {
         if(!output.fSpendable)
-            continue;
+        { nNotSpendable++; continue; }
         const CWalletTx *pcoin = output.tx;
         int i = output.i;
 
+        if (fFalconOnly)
+        {
+            int nStage = IsFalconCoinVerbose(pcoin->vout[i]);
+            if (nStage != 0)
+            {
+                nNotFalcon++;
+                nFalconStage[nStage]++;
+                if (strFirstNonFalcon.empty())
+                    strFirstNonFalcon = HexStr(std::vector<unsigned char>(pcoin->vout[i].scriptPubKey.begin(), pcoin->vout[i].scriptPubKey.end()));
+                uint160 hash(std::vector<unsigned char>(pcoin->vout[i].scriptPubKey.begin() + 2,
+                                                        pcoin->vout[i].scriptPubKey.begin() + 22));
+                std::pair<int, int64_t>& entry = mapNonFalcon[hash];
+                entry.first++;
+                entry.second += pcoin->vout[i].nValue;
+                continue;
+            }
+        }
+
         // Ignore immature coins
         if (pcoin->GetBlocksToMaturity() > 0)
-            continue;
+        { nImmature++; continue; }
 
         // Stop if we've chosen enough inputs
         if (nValueRet >= nTargetValue)
@@ -2034,7 +2168,7 @@ bool CWallet::SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t
 
         // Follow the timestamp rules
         if (pcoin->nTime > nSpendTime)
-            continue;
+        { nFutureTime++; continue; }
 
         int64_t n = pcoin->vout[i].nValue;
 
@@ -2053,6 +2187,71 @@ bool CWallet::SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t
             setCoinsRet.insert(coin.second);
             nValueRet += coin.first;
         }
+    }
+
+    if (setCoinsRet.empty())
+    {
+        if (vCoins.empty())
+            printf("SelectCoinsSimple() : no coins met depth/value limits (minconf=%d, minvalue=%s, maxvalue=%s)\n",
+                   nMinConf, FormatMoney(nMinValue).c_str(), FormatMoney(nMaxValue).c_str());
+        else
+            printf("SelectCoinsSimple() : %d candidate coins rejected"
+                   " (not-spendable=%d non-falcon=%d immature=%d future-time=%d, falcononly=%d)\n",
+                   (int)vCoins.size(), nNotSpendable, nNotFalcon, nImmature, nFutureTime,
+                   (int)(fFalconOnly ? 1 : 0));
+            if (nNotFalcon > 0)
+                printf("SelectCoinsSimple() : non-falcon breakdown"
+                       " (not-p2sh=%d no-redeem-script=%d not-strict-falcon=%d no-falcon-key=%d)\n",
+                       nFalconStage[1], nFalconStage[2], nFalconStage[3], nFalconStage[4]);
+            if (nNotFalcon > 0 && !mapNonFalcon.empty())
+            {
+                int nPrinted = 0;
+                for (std::map<uint160, std::pair<int, int64_t> >::const_iterator mi = mapNonFalcon.begin();
+                     mi != mapNonFalcon.end() && nPrinted < 12; ++mi, nPrinted++)
+                {
+                    CBitcoinAddress addrP2SH, addrFalcon;
+                    addrP2SH.Set(CScriptID(mi->first));
+                    addrFalcon.SetFalconScriptID(CScriptID(mi->first));
+                    printf("SelectCoinsSimple() : rejected hash %s x%d (value %s, as legacy P2SH: %s, as falcon address: %s)\n",
+                           mi->first.GetHex().c_str(), mi->second.first, FormatMoney(mi->second.second).c_str(),
+                           addrP2SH.ToString().c_str(), addrFalcon.ToString().c_str());
+                }
+                if (mapNonFalcon.size() > (size_t)nPrinted)
+                    printf("SelectCoinsSimple() : ... and %d more rejected script hashes\n", (int)(mapNonFalcon.size() - nPrinted));
+            }
+            if (!strFirstNonFalcon.empty())
+                printf("SelectCoinsSimple() : first rejected scriptPubKey: %s\n", strFirstNonFalcon.c_str());
+            // Does the wallet know any redeem scripts at all, and any strict falcon ones?
+            {
+                std::vector<CScriptID> vWalletScripts;
+                GetScriptIDs(vWalletScripts);
+                int nStrictFalconScripts = 0;
+                int nListed = 0;
+                std::string strFalconScriptAddresses;
+                for (unsigned int j = 0; j < vWalletScripts.size(); j++)
+                {
+                    CScript script;
+                    if (!GetCScript(vWalletScripts[j], script))
+                        continue;
+                    CFalconKeyID keyID;
+                    if (IsStrictFalconScript(script, keyID))
+                    {
+                        nStrictFalconScripts++;
+                        if (nListed < 10)
+                        {
+                            CBitcoinAddress addrFalcon;
+                            addrFalcon.SetFalconScriptID(vWalletScripts[j]);
+                            strFalconScriptAddresses += " " + addrFalcon.ToString();
+                            nListed++;
+                        }
+                    }
+                }
+                printf("SelectCoinsSimple() : wallet redeem scripts: total=%d strict-falcon=%d\n",
+                       (int)vWalletScripts.size(), nStrictFalconScripts);
+                if (nStrictFalconScripts > 0)
+                    printf("SelectCoinsSimple() : strict-falcon scripts known (up to 10):%s\n",
+                           strFalconScriptAddresses.c_str());
+            }
     }
 
     return true;
@@ -2078,6 +2277,13 @@ bool CWallet::CreateTransaction(const std::vector<std::pair<CScript, int64_t> >&
         CTxDB txdb("r");
         {
             nFeeRet = nTransactionFee;
+
+            // In the falcon zone all spends must end up on strict falcon scripts,
+            // including the change, so no EC change addresses may be used.
+            bool fFalconChange = IsFalconZoneActive(GetAdjustedTime());
+            CScript scriptFalconChange;
+            bool fFalconChangeReady = false;
+
             for ( ; ; )
             {
                 wtxNew.vin.clear();
@@ -2093,8 +2299,8 @@ bool CWallet::CreateTransaction(const std::vector<std::pair<CScript, int64_t> >&
                 // Choose coins to use
                 std::set<std::pair<const CWalletTx*,unsigned int> > setCoins;
                 int64_t nValueIn = 0;
-                if (!SelectCoins(nTotalValue, wtxNew.nTime, setCoins, nValueIn, coinControl))
-                    return false;
+                if (!SelectCoins(nTotalValue, wtxNew.nTime, setCoins, nValueIn, coinControl, false))
+                    return error("CWallet::CreateTransaction() : no spendable inputs for the tx");
                 for (auto pcoin : setCoins)
                 {
                     int64_t nCredit = pcoin.first->vout[pcoin.second].nValue;
@@ -2109,8 +2315,35 @@ bool CWallet::CreateTransaction(const std::vector<std::pair<CScript, int64_t> >&
                     // change transaction isn't always pay-to-bitcoin-address
                     CScript scriptChange;
 
+                    // falcon zone: change can only go to a falcon address, even if
+                    // coin control requests an EC destination
+                    if (fFalconChange)
+                    {
+                        // A custom change destination is honored when it is a
+                        // strict falcon address (it may belong to another wallet,
+                        // as with legacy EC change). Any legacy destination is
+                        // overruled: zone spends must land on strict falcon only.
+                        if (coinControl && coinControl->destChange.IsValid() &&
+                            coinControl->destChange.IsFalconScript())
+                        {
+                            scriptChange.SetAddress(coinControl->destChange);
+                        }
+                        else
+                        {
+                            if (coinControl && coinControl->destChange.IsValid())
+                                printf("CreateTransaction() : coin control change destination is not a falcon address, using own falcon change\n");
+                            if (!fFalconChangeReady)
+                            {
+                                if (!GetFalconChangeScript(scriptFalconChange))
+                                    return error("CWallet::CreateTransaction() : unable to get a falcon change address");
+                                fFalconChangeReady = true;
+                            }
+                            scriptChange = scriptFalconChange;
+                        }
+                    }
+
                     // coin control: send change to custom address
-                    if (coinControl && coinControl->destChange.IsValid())
+                    else if (coinControl && coinControl->destChange.IsValid())
                         scriptChange.SetAddress(coinControl->destChange);
 
                     // no coin control: send change to newly generated address
@@ -2134,7 +2367,10 @@ bool CWallet::CreateTransaction(const std::vector<std::pair<CScript, int64_t> >&
                     wtxNew.vout.insert(position, CTxOut(nChange, scriptChange));
                 }
                 else
-                    reservekey.ReturnKey();
+                {
+                    if (!fFalconChange)
+                        reservekey.ReturnKey();
+                }
 
                 // Fill vin
                 for (const auto& coin : setCoins)
@@ -2149,7 +2385,7 @@ bool CWallet::CreateTransaction(const std::vector<std::pair<CScript, int64_t> >&
                 // Limit size
                 unsigned int nBytes = ::GetSerializeSize(*(CTransaction*)&wtxNew, SER_NETWORK, PROTOCOL_VERSION);
                 if (nBytes >= MAX_BLOCK_SIZE_GEN/5)
-                    return false;
+                    return error("CWallet::CreateTransaction() : transaction too large (%u bytes)", nBytes);
                 dPriority /= nBytes;
 
                 // Check that enough fee is included
@@ -2319,8 +2555,10 @@ bool CWallet::MergeCoins(const int64_t& nAmount, const int64_t& nMinValue, const
     return true;
 }
 
-bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerationTime, uint32_t nBits, CTransaction &txNew, CKey& key)
+bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerationTime, uint32_t nBits, CTransaction &txNew, CKey& key, CFalconKey& keyFalcon, bool& fFalconKernel)
 {
+    fFalconKernel = false;
+
     CWalletTx wtx;
     if (!GetTransaction(hashTx, wtx))
         return error("Transaction %s is not found\n", hashTx.GetHex().c_str());
@@ -2335,8 +2573,40 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
     if (fDebug && GetBoolArg("-printcoinstake"))
         printf("CreateCoinStake : parsed kernel type=%d\n", whichType);
 
-    if (whichType != TX_PUBKEY && whichType != TX_PUBKEYHASH)
+    bool fKernelFalcon = false;
+    if (whichType == TX_FALCON) // bare strict falcon script
+    {
+        CFalconKeyID keyID((uint256(vSolutions[0])));
+        if (!GetFalconKey(keyID, keyFalcon))
+            return error("CreateCoinStake : falcon kernel has no spendable falcon key\n");
+
+        scriptPubKeyOut = scriptPubKeyKernel;
+        fKernelFalcon = true;
+    }
+    else if (whichType == TX_SCRIPTHASH) // pay to script hash: check for strict falcon redeem script
+    {
+        CScript scriptRedeem;
+        if (GetCScript(CScriptID((uint160(vSolutions[0]))), scriptRedeem))
+        {
+            CFalconKeyID keyID;
+            if (IsStrictFalconScript(scriptRedeem, keyID) && GetFalconKey(keyID, keyFalcon))
+            {
+                scriptPubKeyOut = scriptPubKeyKernel;
+                fKernelFalcon = true;
+            }
+        }
+    }
+
+    if (whichType != TX_PUBKEY && whichType != TX_PUBKEYHASH && !fKernelFalcon)
         return error("CreateCoinStake : no support for kernel type=%d\n", whichType);
+
+    if (whichType == TX_PUBKEY || whichType == TX_PUBKEYHASH)
+    {
+        if (IsFalconZoneActive(nGenerationTime))
+            return false;
+    }
+    if (fKernelFalcon)
+        fFalconKernel = true;
 
     if (whichType == TX_PUBKEYHASH) // pay to address type
     {
@@ -2384,7 +2654,7 @@ bool CWallet::CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nGenerati
 
     int64_t nValueIn = 0;
     CoinsSet setCoins;
-    if (!SelectCoinsSimple(nBalance - nReserveBalance, MIN_TX_FEE, MAX_MONEY, nGenerationTime, nCoinbaseMaturity, setCoins, nValueIn))
+    if (!SelectCoinsSimple(nBalance - nReserveBalance, MIN_TX_FEE, MAX_MONEY, nGenerationTime, nCoinbaseMaturity, setCoins, nValueIn, IsFalconZoneActive(nGenerationTime)))
         return false;
 
     if (setCoins.empty())
@@ -2664,6 +2934,31 @@ DBErrors CWallet::ZapWalletTx()
 bool CWallet::SetAddressBookName(const CTxDestination& address, const std::string& strName)
 {
     return SetAddressBookName(CBitcoinAddress(address), strName);
+}
+
+CBitcoinAddress ResolveFalconScriptAddress(const CWallet* pwallet, const CBitcoinAddress& address)
+{
+    if (!pwallet || !address.IsValid() || !address.IsScript())
+        return address;
+
+    CScriptID scriptID = CScriptID(uint160(address.GetData()));
+    CScript subscript;
+    CFalconKeyID falconKeyID;
+    if (pwallet->GetCScript(scriptID, subscript) && IsStrictFalconScript(subscript, falconKeyID))
+    {
+        CBitcoinAddress addrFalcon;
+        addrFalcon.SetFalconScriptID(scriptID);
+        return addrFalcon;
+    }
+
+    CBitcoinAddress addrFalcon;
+    if (addrFalcon.SetFalconScriptID(scriptID))
+    {
+        LOCK(const_cast<CWallet*>(pwallet)->cs_wallet);
+        if (pwallet->mapAddressBook.count(addrFalcon))
+            return addrFalcon;
+    }
+    return address;
 }
 
 bool CWallet::SetAddressBookName(const CBitcoinAddress& address, const std::string& strName)

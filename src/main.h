@@ -114,6 +114,10 @@ void ThreadScriptCheck(void* parg);
 void ThreadScriptCheckQuit();
 
 bool CheckProofOfWork(uint256 hash, unsigned int nBits);
+bool IsStrictFalconActive(int64_t nTime);
+bool IsFalconZoneActive(int64_t nTime);
+bool IsFeeBurnActive(int64_t nTime);
+unsigned int GetScriptFalconFlags(int64_t nTime);
 unsigned int GetNextTargetRequired(const CBlockIndex* pindexLast, bool fProofOfStake);
 int64_t GetProofOfWorkReward(int64_t nFees);
 int64_t GetProofOfStakeReward(int64_t nCoinAge);
@@ -544,7 +548,7 @@ public:
         @return True if all inputs (scriptSigs) use only standard transaction forms
         @see CTransaction::FetchInputs
     */
-    bool AreInputsStandard(const MapPrevTx& mapInputs) const;
+    bool AreInputsStandard(const MapPrevTx& mapInputs, int64_t nSpendTime=0) const;
 
     /** Count ECDSA signature operations the old-fashioned (pre-0.6) way
         @return number of sigops this transaction's outputs will produce when spent
@@ -1109,7 +1113,7 @@ public:
     bool CheckBlock(bool fCheckPOW=true, bool fCheckMerkleRoot=true, bool fCheckSig=true) const;
     bool AcceptBlock();
     bool GetCoinAge(uint64_t& nCoinAge) const; // ppcoin: calculate total coin age spent in block
-    bool CheckBlockSignature() const;
+    bool CheckBlockSignature(int64_t nTimeCheck=-1) const;
 
 private:
     bool SetBestChainInner(CTxDB& txdb, CBlockIndex *pindexNew);

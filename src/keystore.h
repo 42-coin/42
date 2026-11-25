@@ -6,6 +6,7 @@
 #define BITCOIN_KEYSTORE_H
 
 #include "crypter.h"
+#include "falconkey.h"
 #include "sync.h"
 
 #include <boost/signals2/signal.hpp>
@@ -56,6 +57,24 @@ public:
     virtual bool HaveCScript(const CScriptID &hash) const =0;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const =0;
 
+    // Support for post-quantum Falcon-512 keys
+    virtual bool AddFalconKey(const CFalconKey& key)
+    {
+        return false;
+    }
+    virtual bool HaveFalconKey(const CFalconKeyID& keyID) const
+    {
+        return false;
+    }
+    virtual bool GetFalconKey(const CFalconKeyID& keyID, CFalconKey& keyOut) const
+    {
+        return false;
+    }
+    virtual void GetFalconKeys(std::set<CFalconKeyID>& setKeyIDs) const
+    {
+        setKeyIDs.clear();
+    }
+
     // Support for Watch-only addresses
     virtual bool AddWatchOnly(const CScript &dest) =0;
     virtual bool RemoveWatchOnly(const CScript &dest) =0;
@@ -79,6 +98,8 @@ public:
 
 typedef std::map<CKeyID, std::pair<CSecret, bool> > KeyMap;
 typedef std::map<CScriptID, CScript > ScriptMap;
+typedef std::map<CFalconKeyID, CFalconKey> FalconKeyMap;
+typedef std::map<CFalconKeyID, std::pair<std::vector<unsigned char>, std::vector<unsigned char> > > CryptedFalconKeyMap;
 typedef std::set<CScript> WatchOnlySet;
 typedef std::map<CMalleableKeyView, CSecret> MalleableKeyMap;
 
@@ -93,6 +114,9 @@ protected:
     WatchOnlySet setWatchOnly;
 
 public:
+    // Diagnostics: list the IDs of all redeem scripts known to the keystore
+    void GetScriptIDs(std::vector<CScriptID>& vIDs) const;
+
     bool AddKey(const CKey& key);
     bool AddMalleableKey(const CMalleableKeyView& keyView, const CSecret &vchSecretH);
     bool GetMalleableKey(const CMalleableKeyView &keyView, CMalleableKey &mKey) const
@@ -144,10 +168,60 @@ public:
     virtual bool HaveCScript(const CScriptID &hash) const;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const;
 
+    bool AddFalconKey(const CFalconKey& key)
+    {
+        {
+            LOCK(cs_KeyStore);
+            FalconKeyMap::const_iterator mi = mapFalconKeys.find(key.GetID());
+            if (mi != mapFalconKeys.end())
+                return false;
+            mapFalconKeys[key.GetID()] = key;
+        }
+        return true;
+    }
+
+    bool HaveFalconKey(const CFalconKeyID& keyID) const
+    {
+        bool result;
+        {
+            LOCK(cs_KeyStore);
+            result = (mapFalconKeys.count(keyID) > 0);
+        }
+        return result;
+    }
+
+    bool GetFalconKey(const CFalconKeyID& keyID, CFalconKey& keyOut) const
+    {
+        {
+            LOCK(cs_KeyStore);
+            FalconKeyMap::const_iterator mi = mapFalconKeys.find(keyID);
+            if (mi != mapFalconKeys.end())
+            {
+                keyOut = mi->second;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void GetFalconKeys(std::set<CFalconKeyID>& setKeyIDs) const
+    {
+        setKeyIDs.clear();
+        {
+            LOCK(cs_KeyStore);
+            FalconKeyMap::const_iterator mi;
+            for (mi = mapFalconKeys.begin(); mi != mapFalconKeys.end(); ++mi)
+                setKeyIDs.insert((*mi).first);
+        }
+    }
+
     virtual bool AddWatchOnly(const CScript &dest);
     virtual bool RemoveWatchOnly(const CScript &dest);
     virtual bool HaveWatchOnly(const CScript &dest) const;
     virtual bool HaveWatchOnly() const;
+
+protected:
+    FalconKeyMap mapFalconKeys;
 
     bool CheckOwnership(const CPubKey &pubKeyVariant, const CPubKey &R) const
     {
@@ -223,6 +297,7 @@ public:
 
 typedef std::map<CKeyID, std::pair<CPubKey, std::vector<unsigned char> > > CryptedKeyMap;
 typedef std::map<CMalleableKeyView, std::vector<unsigned char> > CryptedMalleableKeyMap;
+typedef std::map<CFalconKeyID, std::pair<std::vector<unsigned char>, std::vector<unsigned char> > > CryptedFalconKeyMap;
 
 /** Keystore which keeps the private keys encrypted.
  * It derives from the basic key store, which is used if no encryption is active.
@@ -232,6 +307,7 @@ class CCryptoKeyStore : public CBasicKeyStore
 private:
     CryptedKeyMap mapCryptedKeys;
     CryptedMalleableKeyMap mapCryptedMalleableKeys;
+    CryptedFalconKeyMap mapCryptedFalconKeys;
 
     CKeyingMaterial vMasterKey;
 
@@ -303,6 +379,35 @@ public:
     }
 
     bool GetMalleableKey(const CMalleableKeyView &keyView, CMalleableKey &mKey) const;
+
+    virtual bool AddCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret);
+
+    bool AddFalconKey(const CFalconKey& key);
+    bool HaveFalconKey(const CFalconKeyID& keyID) const
+    {
+        {
+            LOCK(cs_KeyStore);
+            if (!IsCrypted())
+                return CBasicKeyStore::HaveFalconKey(keyID);
+            return mapCryptedFalconKeys.count(keyID) > 0;
+        }
+    }
+    bool GetFalconKey(const CFalconKeyID& keyID, CFalconKey& keyOut) const;
+    void GetFalconKeys(std::set<CFalconKeyID>& setKeyIDs) const
+    {
+        if (!IsCrypted())
+        {
+            CBasicKeyStore::GetFalconKeys(setKeyIDs);
+            return;
+        }
+        setKeyIDs.clear();
+        {
+            LOCK(cs_KeyStore);
+            CryptedFalconKeyMap::const_iterator mi;
+            for (mi = mapCryptedFalconKeys.begin(); mi != mapCryptedFalconKeys.end(); ++mi)
+                setKeyIDs.insert((*mi).first);
+        }
+    }
 
     bool CheckOwnership(const CPubKey &pubKeyVariant, const CPubKey &R) const
     {

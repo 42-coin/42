@@ -15,11 +15,14 @@
 #include "random.h"
 #include "wallet.h"
 #include "scrypt.h"
+#include "falconverify.h"
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 
 #include <regex>
+#include <climits>
+#include <cmath>
 
 
 CCriticalSection cs_setpwalletRegistered;
@@ -354,6 +357,42 @@ bool CTransaction::IsStandard(std::string& strReason) const
     return true;
 }
 
+bool IsStrictFalconActive(int64_t nTime)
+{
+    return nTime >= (int64_t)(fTestNet ? STRICT_FALCON_SWITCH_TIME_TESTNET : STRICT_FALCON_SWITCH_TIME);
+}
+
+bool IsFalconZoneActive(int64_t nTime)
+{
+    return nTime >= (int64_t)(fTestNet ? FALCON_ZONE_SWITCH_TIME_TESTNET : FALCON_ZONE_SWITCH_TIME);
+}
+
+bool IsFeeBurnActive(int64_t nTime)
+{
+    return nTime >= (int64_t)(fTestNet ? FEE_BURN_SWITCH_TIME_TESTNET : FEE_BURN_SWITCH_TIME);
+}
+
+unsigned int GetScriptFalconFlags(int64_t nTime)
+{
+    return IsStrictFalconActive(nTime) ? SCRIPT_VERIFY_FALCON : 0;
+}
+
+static bool GetRedeemScriptFromScriptSig(const CScript& scriptSig, CScript& scriptRedeemRet)
+{
+    valtype vchLast;
+    CScript::const_iterator pc = scriptSig.begin();
+    while (pc != scriptSig.end())
+    {
+        opcodetype opcode;
+        if (!scriptSig.GetOp(pc, opcode, vchLast))
+            return false;
+    }
+    if (vchLast.empty())
+        return false;
+    scriptRedeemRet = CScript(vchLast.begin(), vchLast.end());
+    return true;
+}
+
 //
 // Check transaction inputs, and make sure any
 // pay-to-script-hash transactions are evaluating IsStandard scripts
@@ -365,7 +404,7 @@ bool CTransaction::IsStandard(std::string& strReason) const
 // expensive-to-check-upon-redemption script like:
 //   DUP CHECKSIG DROP ... repeated 100 times... OP_1
 //
-bool CTransaction::AreInputsStandard(const MapPrevTx& mapInputs) const
+bool CTransaction::AreInputsStandard(const MapPrevTx& mapInputs, int64_t nSpendTime) const
 {
     if (IsCoinBase())
         return true; // Coinbases don't use vin normally
@@ -404,6 +443,15 @@ bool CTransaction::AreInputsStandard(const MapPrevTx& mapInputs) const
                 return false;
             if (whichType2 == TX_SCRIPTHASH)
                 return false;
+
+            if (nSpendTime > 0 && IsFalconZoneActive(nSpendTime))
+            {
+                CScript scriptRedeem;
+                CFalconKeyID falconKeyID;
+                if (!GetRedeemScriptFromScriptSig(vin[i].scriptSig, scriptRedeem) ||
+                    !IsStrictFalconScript(scriptRedeem, falconKeyID))
+                    return false;
+            }
 
             int tmpExpected;
             tmpExpected = ScriptSigArgsExpected(whichType2, vSolutions2);
@@ -671,7 +719,7 @@ bool CTxMemPool::accept(CTxDB& txdb, CTransaction &tx, bool fCheckInputs,
         }
 
         // Check for non-standard pay-to-script-hash in inputs
-        if (!tx.AreInputsStandard(mapInputs) && !fTestNet)
+        if (!tx.AreInputsStandard(mapInputs, GetAdjustedTime()) && !fTestNet)
             return error("CTxMemPool::accept() : nonstandard transaction input");
 
         // Note: if you modify this code to accept non-standard transactions, then
@@ -715,7 +763,8 @@ bool CTxMemPool::accept(CTxDB& txdb, CTransaction &tx, bool fCheckInputs,
 
         // Check against previous transactions
         // This is done last to help prevent CPU exhaustion denial-of-service attacks.
-        if (!tx.ConnectInputs(txdb, mapInputs, mapUnused, CDiskTxPos(1,1,1), pindexBest, false, false, true, STRICT_FLAGS))
+        unsigned int nTxFlags = STRICT_FLAGS | GetScriptFalconFlags(GetAdjustedTime());
+        if (!tx.ConnectInputs(txdb, mapInputs, mapUnused, CDiskTxPos(1,1,1), pindexBest, false, false, true, nTxFlags))
         {
             return error("CTxMemPool::accept() : ConnectInputs failed %s", hash.ToString().substr(0,10).c_str());
         }
@@ -1335,6 +1384,19 @@ bool CTransaction::ConnectInputs(CTxDB& txdb, MapPrevTx inputs, std::map<uint256
     {
         int64_t nValueIn = 0;
         int64_t nFees = 0;
+
+        // In the falcon zone all outputs must be hash-locked (P2SH shaped);
+        // their redeem scripts verify under strict falcon rules when spent.
+        // Prev outputs of any kind stay spendable — that is the one-way
+        // EC-to-falcon migration, no coins are frozen.
+        if (IsFalconZoneActive(nTime))
+        {
+            for (const CTxOut& txout : vout)
+                if (!txout.IsEmpty() && !txout.scriptPubKey.IsPayToScriptHash())
+                    return DoS(100, error("ConnectInputs() : %s output outside P2SH in the falcon zone",
+                                          GetHash().ToString().substr(0,10).c_str()));
+        }
+
         for (unsigned int i = 0; i < vin.size(); i++)
         {
             COutPoint prevout = vin[i].prevout;
@@ -1359,6 +1421,20 @@ bool CTransaction::ConnectInputs(CTxDB& txdb, MapPrevTx inputs, std::map<uint256
             nValueIn += txPrev.vout[prevout.n].nValue;
             if (!MoneyRange(txPrev.vout[prevout.n].nValue) || !MoneyRange(nValueIn))
                 return DoS(100, error("ConnectInputs() : txin values out of range"));
+
+            // In the falcon zone the coinstake kernel (first input) must be
+            // a strict falcon output
+            if (IsCoinStake() && i == 0 && IsFalconZoneActive(nTime))
+            {
+                const CScript& prevScriptPubKey = txPrev.vout[prevout.n].scriptPubKey;
+                CScript scriptRedeem;
+                CFalconKeyID falconKeyID;
+                if (!prevScriptPubKey.IsPayToScriptHash() ||
+                    !GetRedeemScriptFromScriptSig(vin[i].scriptSig, scriptRedeem) ||
+                    !IsStrictFalconScript(scriptRedeem, falconKeyID))
+                    return DoS(100, error("ConnectInputs() : %s coinstake kernel outside strict falcon scripts",
+                                          GetHash().ToString().substr(0,10).c_str()));
+            }
 
         }
 
@@ -1631,6 +1707,8 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
                 nFlags |= SCRIPT_VERIFY_CHECKSEQUENCEVERIFY;
             }
 
+            nFlags |= GetScriptFalconFlags(tx.nTime);
+
             std::vector<CScriptCheck> vChecks;
             if (!tx.ConnectInputs(txdb, mapInputs, mapQueuedChanges, posThisTx, pindex, true, false, fScriptChecks, nFlags, nScriptCheckThreads ? &vChecks : NULL))
                 return false;
@@ -1645,7 +1723,10 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
 
     if (IsProofOfWork())
     {
-        int64_t nBlockReward = GetProofOfWorkReward(nFees);
+        // after FEE_BURN_SWITCH_TIME a PoW block must claim no fees, they are
+        // destroyed exactly like in proof-of-stake blocks
+        int64_t nBlockReward = IsFeeBurnActive(pindex->nTime) ?
+                GetProofOfWorkReward(0) : GetProofOfWorkReward(nFees);
 
         // Check coinbase reward
         if (vtx[0].GetValueOut() > nBlockReward)
@@ -2122,7 +2203,7 @@ bool CBlock::CheckBlock(bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSig) c
             return DoS(50, error("CheckBlock() : coinstake timestamp violation nTimeBlock=%" PRId64 " nTimeTx=%u", GetBlockTime(), vtx[1].nTime));
 
         // 42: check proof-of-stake block signature
-        if (fCheckSig && !CheckBlockSignature())
+        if (fCheckSig && !CheckBlockSignature(GetBlockTime()))
             return DoS(100, error("CheckBlock() : bad proof-of-stake block signature"));
 
         if (!vtx[1].CheckTransaction())
@@ -2549,26 +2630,77 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 }
 
 // ppcoin: check block signature
-bool CBlock::CheckBlockSignature() const
+bool CBlock::CheckBlockSignature(int64_t nTimeCheck) const
 {
     if (vchBlockSig.empty())
         return false;
 
-    txnouttype whichType;
-    std::vector<valtype> vSolutions;
-    if (!Solver(vtx[1].vout[1].scriptPubKey, whichType, vSolutions))
-        return false;
+    if (nTimeCheck < 0)
+        nTimeCheck = GetBlockTime();
+    bool fFalconRequired = IsFalconZoneActive(nTimeCheck);
 
-    if (whichType == TX_PUBKEY)
+    if (!fFalconRequired || nTimeCheck < 0)
     {
-        valtype& vchPubKey = vSolutions[0];
-        CPubKey key(vchPubKey);
-        if (!key.IsValid())
+        // Legacy path: ECDSA signature by the public key of the coinstake payout
+        txnouttype whichType;
+        std::vector<valtype> vSolutions;
+        if (Solver(vtx[1].vout[1].scriptPubKey, whichType, vSolutions) && whichType == TX_PUBKEY)
+        {
+            valtype& vchPubKey = vSolutions[0];
+            CPubKey key(vchPubKey);
+            if (key.IsValid() && key.Verify(GetHash(), vchBlockSig))
+                return true;
+        }
+        if (!fFalconRequired || nTimeCheck < 0)
             return false;
-        return key.Verify(GetHash(), vchBlockSig);
     }
 
-    return false;
+    // Falcon path: the falcon public key is taken from the coinstake kernel
+    // input scriptSig and must match the strict falcon redeem script; the block
+    // signature is a Falcon-512 signature over the block hash. The coinstake
+    // payout must be the pay-to-script-hash of that redeem script.
+    if (vtx[1].vin.empty())
+        return false;
+
+    std::vector<valtype> vchPushes;
+    {
+        CScript::const_iterator pc = vtx[1].vin[0].scriptSig.begin();
+        while (pc != vtx[1].vin[0].scriptSig.end())
+        {
+            opcodetype opcode;
+            valtype vch;
+            if (!vtx[1].vin[0].scriptSig.GetOp(pc, opcode, vch))
+                return false;
+            vchPushes.push_back(vch);
+        }
+    }
+    if (vchPushes.size() != 5)
+        return false;
+
+    // Phoenix scriptSig layout: [sig2, sig1, key2, key1, redeemScript]
+    CScript scriptRedeem(vchPushes[4].begin(), vchPushes[4].end());
+    CFalconKeyID falconKeyID;
+    if (!IsStrictFalconScript(scriptRedeem, falconKeyID))
+        return false;
+    std::vector<unsigned char> vchFalconPubKey = vchPushes[3];
+    vchFalconPubKey.insert(vchFalconPubKey.end(), vchPushes[2].begin(), vchPushes[2].end());
+    std::vector<unsigned char> vchFalconSig = vchBlockSig;
+    if (vchFalconPubKey.size() != FALCON512_PUBKEY_SIZE ||
+            vchPushes[2].size() > CFalconKey::CHUNK_SIZE ||
+            vchPushes[3].size() > CFalconKey::CHUNK_SIZE ||
+            vchPushes[0].size() > CFalconKey::CHUNK_SIZE ||
+            vchPushes[1].size() > CFalconKey::CHUNK_SIZE ||
+            vchBlockSig.size() > FALCON512_SIG_MAX_SIZE || vchBlockSig.empty())
+        return false;
+    if (CFalconKey::MakeKeyID(vchFalconPubKey) != falconKeyID)
+        return false;
+
+    CScript scriptPayout;
+    scriptPayout << OP_HASH160 << scriptRedeem.GetID() << OP_EQUAL;
+    if (vtx[1].vout.size() < 2 || scriptPayout != vtx[1].vout[1].scriptPubKey)
+        return false;
+
+    return VerifyFalconMessage(vchFalconSig, GetHash().begin(), sizeof(uint256), vchFalconPubKey);
 }
 
 bool CheckDiskSpace(uint64_t nAdditionalBytes)

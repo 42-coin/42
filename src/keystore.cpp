@@ -61,6 +61,15 @@ bool CBasicKeyStore::HaveCScript(const CScriptID& hash) const
 }
 
 
+void CBasicKeyStore::GetScriptIDs(std::vector<CScriptID>& vIDs) const
+{
+    LOCK(cs_KeyStore);
+    vIDs.clear();
+    vIDs.reserve(mapScripts.size());
+    for (ScriptMap::const_iterator mi = mapScripts.begin(); mi != mapScripts.end(); ++mi)
+        vIDs.push_back(mi->first);
+}
+
 bool CBasicKeyStore::GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const
 {
     {
@@ -197,6 +206,67 @@ bool CCryptoKeyStore::AddKey(const CKey& key)
             return false;
     }
     return true;
+}
+
+bool CCryptoKeyStore::AddFalconKey(const CFalconKey& key)
+{
+    {
+        LOCK(cs_KeyStore);
+
+        if (!IsCrypted())
+            return CBasicKeyStore::AddFalconKey(key);
+
+        if (IsLocked())
+            return false;
+
+        std::vector<unsigned char> vchCryptedSecret;
+        if (!EncryptSecret(vMasterKey, key.GetPrivKey(), key.GetID(), vchCryptedSecret))
+            return false;
+
+        if (!AddCryptedFalconKey(key.GetID(), key.GetPubKey(), vchCryptedSecret))
+            return false;
+    }
+    return true;
+}
+
+bool CCryptoKeyStore::AddCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret)
+{
+    {
+        LOCK(cs_KeyStore);
+        if (!SetCrypted())
+            return false;
+
+        mapCryptedFalconKeys[keyID] = std::make_pair(vchPubKey, vchCryptedSecret);
+    }
+    return true;
+}
+
+bool CCryptoKeyStore::GetFalconKey(const CFalconKeyID& keyID, CFalconKey& keyOut) const
+{
+    {
+        LOCK(cs_KeyStore);
+        if (!IsCrypted())
+            return CBasicKeyStore::GetFalconKey(keyID, keyOut);
+
+        CryptedFalconKeyMap::const_iterator mi = mapCryptedFalconKeys.find(keyID);
+        if (mi != mapCryptedFalconKeys.end())
+        {
+            const std::vector<unsigned char>& vchPubKey = mi->second.first;
+            const std::vector<unsigned char>& vchCryptedSecret = mi->second.second;
+            CFalconPrivKey vchPrivKey;
+            if (!DecryptSecret(vMasterKey, vchCryptedSecret, keyID, vchPrivKey))
+                return false;
+            if (vchPrivKey.size() != FALCON512_PRIVKEY_SIZE)
+                return false;
+            keyOut = CFalconKey();
+            CFalconPrivKey vchPrivKeyCopy(vchPrivKey.begin(), vchPrivKey.end());
+            keyOut.SetPubKey(vchPubKey);
+            if (!keyOut.SetPrivKey(vchPrivKeyCopy))
+                return false;
+            return keyOut.IsValid();
+        }
+    }
+    return false;
 }
 
 bool CCryptoKeyStore::AddMalleableKey(const CMalleableKeyView& keyView, const CSecret &vchSecretH)
@@ -364,6 +434,17 @@ bool CCryptoKeyStore::EncryptKeys(CKeyingMaterial& vMasterKeyIn)
         }
         mapKeys.clear();
 
+        for (FalconKeyMap::value_type& mKey : mapFalconKeys)
+        {
+            const CFalconKey& key = mKey.second;
+            std::vector<unsigned char> vchCryptedSecret;
+            if (!EncryptSecret(vMasterKeyIn, key.GetPrivKey(), key.GetID(), vchCryptedSecret))
+                return false;
+            if (!AddCryptedFalconKey(key.GetID(), key.GetPubKey(), vchCryptedSecret))
+                return false;
+        }
+        mapFalconKeys.clear();
+
         for (MalleableKeyMap::value_type& mKey : mapMalleableKeys)
         {
             const CPubKey vchPubKeyH = mKey.first.GetMalleablePubKey().GetH();
@@ -419,6 +500,29 @@ bool CCryptoKeyStore::DecryptKeys(const CKeyingMaterial& vMasterKeyIn)
                 return false;
         }
         mapCryptedMalleableKeys.clear();
+
+        CryptedFalconKeyMap::const_iterator mi3 = mapCryptedFalconKeys.begin();
+        for(; mi3 != mapCryptedFalconKeys.end(); ++mi3)
+        {
+            const std::vector<unsigned char>& vchPubKey = mi3->second.first;
+            const std::vector<unsigned char>& vchCryptedSecret = mi3->second.second;
+
+            CFalconPrivKey vchPrivKey;
+            if(!DecryptSecret(vMasterKeyIn, vchCryptedSecret, mi3->first, vchPrivKey))
+                return false;
+            if (vchPrivKey.size() != FALCON512_PRIVKEY_SIZE)
+                return false;
+
+            CFalconKey key;
+            key.SetPubKey(vchPubKey);
+            CFalconPrivKey vchPrivKeyCopy(vchPrivKey.begin(), vchPrivKey.end());
+            if (!key.SetPrivKey(vchPrivKeyCopy))
+                return false;
+
+            if (!CBasicKeyStore::AddFalconKey(key))
+                return false;
+        }
+        mapCryptedFalconKeys.clear();
     }
 
     return true;

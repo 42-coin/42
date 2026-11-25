@@ -16,6 +16,7 @@
 #define BITCOIN_BASE58_H
 
 #include "key.h"
+#include "falconkey.h"
 #include "script.h"
 
 #include <openssl/crypto.h> // for OPENSSL_cleanse()
@@ -93,13 +94,16 @@ public:
         PUBKEY_PAIR_ADDRESS = 1,
         PUBKEY_ADDRESS = 8,
         SCRIPT_ADDRESS = 20,
+        SCRIPT_ADDRESS_FALCON = 95,
         PUBKEY_PAIR_ADDRESS_TEST = 6,
         PUBKEY_ADDRESS_TEST = 111,
-        SCRIPT_ADDRESS_TEST = 196
+        SCRIPT_ADDRESS_TEST = 196,
+        SCRIPT_ADDRESS_FALCON_TEST = 127
     };
 
     bool Set(const CKeyID &id);
     bool Set(const CScriptID &id);
+    bool SetFalconScriptID(const CScriptID &id);
     bool Set(const CTxDestination &dest);
     bool Set(const CMalleablePubKey &mpk);
     bool Set(const CBitcoinAddress &dest);
@@ -113,9 +117,11 @@ public:
 
     CTxDestination Get() const;
     bool GetKeyID(CKeyID &keyID) const;
+    bool GetFalconScriptID(CScriptID &id) const;
     bool IsScript() const;
     bool IsPubKey() const;
     bool IsPair() const;
+    bool IsFalconScript() const;
 };
 
 /** A base58-encoded secret key */
@@ -129,6 +135,23 @@ public:
 
     CBitcoinSecret(const CSecret& vchSecret, bool fCompressed);
     CBitcoinSecret() {}
+};
+
+/** base58-encoded Falcon-512 secret key
+ * The data vector contains the serialized CFalconKey:
+ * falcon-512 public key (897 bytes) followed by the private key (1281 bytes).
+ */
+class CBitcoinFalconKey : public CBase58Data {
+public:
+    void SetKey(const CFalconKey& key);
+    bool GetKey(CFalconKey& keyOut) const;
+    bool IsValid() const;
+    unsigned char GetVersion() const { return nVersion; }
+    bool SetString(const char* pszSecret);
+    bool SetString(const std::string& strSecret);
+
+    CBitcoinFalconKey(const CFalconKey& key) { SetKey(key); }
+    CBitcoinFalconKey() {}
 };
 
 #endif

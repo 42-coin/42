@@ -58,7 +58,7 @@ public:
 class CWallet : public CCryptoKeyStore
 {
 private:
-    bool SelectCoins(int64_t nTargetValue, unsigned int nSpendTime, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet, const CCoinControl *coinControl=NULL) const;
+    bool SelectCoins(int64_t nTargetValue, unsigned int nSpendTime, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet, const CCoinControl *coinControl=NULL, bool fFalconOnly=false) const;
 
     CWalletDB *pwalletdbEncryption, *pwalletdbDecryption;
 
@@ -117,7 +117,7 @@ public:
     bool SelectCoinsMinConf(int64_t nTargetValue, unsigned int nSpendTime, int nConfMine, int nConfTheirs, std::vector<COutput> vCoins, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet) const;
 
     // Simple select (without randomization)
-    bool SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t nMaxValue, unsigned int nSpendTime, int nMinConf, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet) const;
+    bool SelectCoinsSimple(int64_t nTargetValue, int64_t nMinValue, int64_t nMaxValue, unsigned int nSpendTime, int nMinConf, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64_t& nValueRet, bool fFalconOnly=false) const;
 
     // keystore implementation
     // Generate a new key
@@ -145,6 +145,19 @@ public:
     bool LoadCryptedKey(const CPubKey &vchPubKey, const std::vector<unsigned char> &vchCryptedSecret);
     bool AddCScript(const CScript& redeemScript);
     bool LoadCScript(const CScript& redeemScript);
+
+    // Post-quantum Falcon-512 keys
+    bool GenerateNewFalconKey(CFalconKey& keyOut, CBitcoinAddress& addressOut);
+    bool AddFalconKey(const CFalconKey& key, const CBitcoinAddress& address);
+    // Adds a falcon key to the store, without saving it to disk (used by LoadWallet)
+    bool LoadFalconKey(const CFalconKey& key) { return CCryptoKeyStore::AddFalconKey(key); }
+    bool LoadCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret);
+    bool AddCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret);
+    bool GetFalconChangeScript(CScript& scriptChange);
+    bool IsFalconCoin(const CTxOut& txout) const;
+    // Diagnostics: 0 = falcon coin, 1 = not P2SH, 2 = redeem script not in wallet,
+    // 3 = redeem script is not a strict falcon script, 4 = falcon key missing
+    int IsFalconCoinVerbose(const CTxOut& txout) const;
 
     // Adds a watch-only address to the store, and saves it to disk.
     bool AddWatchOnly(const CScript &dest);
@@ -200,7 +213,7 @@ public:
     bool CommitTransaction(CWalletTx& wtxNew, CReserveKey& reservekey);
 
     void GetStakeWeightFromValue(const int64_t& nTime, const int64_t& nValue, uint64_t& nWeight);
-    bool CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nTime, uint32_t nBits, CTransaction &txNew, CKey& key);
+    bool CreateCoinStake(uint256 &hashTx, uint32_t nOut, uint32_t nTime, uint32_t nBits, CTransaction &txNew, CKey& key, CFalconKey& keyFalcon, bool& fFalconKernel);
     bool MergeCoins(const int64_t& nAmount, const int64_t& nMinValue, const int64_t& nMaxValue, std::list<uint256>& listMerged);
 
     std::string SendMoney(CScript scriptPubKey, int64_t nValue, CWalletTx& wtxNew, bool fAskFee=false);
@@ -584,5 +597,10 @@ private:
 };
 
 bool GetWalletFile(CWallet* pwallet, std::string &strWalletFileOut);
+
+// Resolve a legacy-converted P2SH address back to the strict falcon
+// address version when the wallet knows the redeem script or has the
+// falcon-version address in its address book (used for JSON/Qt display).
+CBitcoinAddress ResolveFalconScriptAddress(const CWallet* pwallet, const CBitcoinAddress& address);
 
 #endif

@@ -48,6 +48,7 @@ public:
         AmountExceedsBalance,
         AmountWithFeeExceedsBalance,
         DuplicateAddress,
+        FalconAddressRequired,
         TransactionCreationFailed, // Error returned when wallet is still locked
         TransactionCommitFailed,
         Aborted

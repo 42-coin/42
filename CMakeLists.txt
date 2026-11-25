@@ -133,6 +133,8 @@ set(generic_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/src/netbase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ntp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/key.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/falconkey.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/falconverify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/script.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/streams.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
@@ -282,6 +284,10 @@ list(APPEND ALL_DEFINITIONS HAVE_BUILD_INFO)
 
 add_executable(42-qt WIN32 ${ALL_SOURCES})
 
+set(liboqs_DIR "/usr/local/lib/cmake/liboqs")
+# Consensus-tested with liboqs 0.16.0; other versions must pass the startup self-test
+find_package(liboqs REQUIRED)
+
 target_precompile_headers(42-qt
   PRIVATE
     <algorithm>
@@ -430,7 +436,8 @@ set(CMAKE_EXE_LINKER_FLAGS ${ALL_LINKER_FLAGS} CACHE INTERNAL "")
 endif()
 
 target_include_directories(42-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/src/qt ${CMAKE_CURRENT_SOURCE_DIR}/src/json ${BerkeleyDB_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src/additional/leveldb/helpers ${CMAKE_CURRENT_SOURCE_DIR}/src/additional/libqrencode ${Boost_INCLUDE_DIRS})
-target_link_libraries(42-qt ${ALL_LIBRARIES})
+
+target_link_libraries(42-qt ${ALL_LIBRARIES} OQS::oqs)
 
 target_compile_features(42-qt PUBLIC cxx_std_17)
 

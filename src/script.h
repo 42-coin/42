@@ -5,6 +5,7 @@
 #ifndef H_BITCOIN_SCRIPT
 #define H_BITCOIN_SCRIPT
 
+#include "falconkey.h"
 #include "keystore.h"
 #include "bignum.h"
 #include "util.h"
@@ -71,7 +72,8 @@ enum
     SCRIPT_VERIFY_NOCACHE   = (1U << 3), // do not store results in signature cache (but do query it)
     SCRIPT_VERIFY_NULLDUMMY = (1U << 4), // verify dummy stack item consumed by CHECKMULTISIG is of zero-length
     SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY = (1U << 9),
-    SCRIPT_VERIFY_CHECKSEQUENCEVERIFY = (1U << 10)
+    SCRIPT_VERIFY_CHECKSEQUENCEVERIFY = (1U << 10),
+    SCRIPT_VERIFY_FALCON = (1U << 5) // evaluate OQS Falcon-512 signatures in strict falcon scripts
 };
 
 // Strict verification:
@@ -104,7 +106,8 @@ enum txnouttype
     TX_PUBKEYHASH,
     TX_SCRIPTHASH,
     TX_MULTISIG,
-    TX_NULL_DATA
+    TX_NULL_DATA,
+    TX_FALCON
 };
 
 const char* GetTxnOutputType(txnouttype t);
@@ -243,6 +246,9 @@ enum opcodetype
     OP_NOP8 = 0xb7,
     OP_NOP9 = 0xb8,
     OP_NOP10 = 0xb9,
+
+    OP_FALCONVERIFY = OP_NOP10,
+    OP_FALCONMARKER = OP_NOP4,
 
     // template matching params
     OP_SMALLDATA = 0xf9,
@@ -631,6 +637,8 @@ bool IsDERSignature(const valtype &vchSig, bool fWithHashType=false, bool fCheck
 bool IsCanonicalSignature(const std::vector<unsigned char> &vchSig, unsigned int flags);
 
 bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, const CTransaction& txTo, unsigned int nIn, unsigned int flags, int nHashType);
+CScript BuildFalconRedeemScript(const CFalconKeyID& keyID);
+bool IsStrictFalconScript(const CScript& script, CFalconKeyID& keyIDRet);
 bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::vector<unsigned char> >& vSolutionsRet);
 int ScriptSigArgsExpected(txnouttype t, const std::vector<std::vector<unsigned char> >& vSolutions);
 bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType);

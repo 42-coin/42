@@ -227,6 +227,11 @@ void SendCoinsDialog::on_sendButton_clicked()
             tr("Duplicate address found, can only send to each address once per send operation."),
             QMessageBox::Ok, QMessageBox::Ok);
         break;
+    case WalletModel::FalconAddressRequired:
+        QMessageBox::warning(this, tr("Send Coins"),
+            tr("The post-quantum zone is active: sending to legacy (non-Falcon) addresses is disabled. Use a Falcon address (f...) instead."),
+            QMessageBox::Ok, QMessageBox::Ok);
+        break;
     case WalletModel::TransactionCreationFailed:
         QMessageBox::warning(this, tr("Send Coins"),
             tr("Error: Transaction creation failed."),

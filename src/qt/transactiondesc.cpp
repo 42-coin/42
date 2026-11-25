@@ -83,7 +83,9 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx)
                         CTxDestination address;
                         if (ExtractDestination(txout.scriptPubKey, address) && IsMine(*wallet, address))
                         {
-                            if (wallet->mapAddressBook.count(address))
+                            // keystore-aware: resolve strict falcon redeem scripts to falcon addresses (f...)
+                            CBitcoinAddress resolvedAddr = ResolveFalconScriptAddress(wallet, CBitcoinAddress(address));
+                            if (wallet->mapAddressBook.count(resolvedAddr))
                             {
                                 std::vector<CTxDestination> addedAddresses;
                                 for (unsigned int i = 0; i < wtx.vin.size(); i++)
@@ -103,24 +105,28 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx)
                                     {
                                         strHTML += "<b>" + tr("From") + ":</b> " + tr("unknown") + "<br>";
                                     }
-                                    else if(std::find(addedAddresses.begin(), addedAddresses.end(), senderAddress) 
-                                            == addedAddresses.end() )
+                                    else
                                     {
-                                        addedAddresses.push_back(senderAddress);
-                                        strHTML += "<b>" + tr("From") + ":</b> ";
-                                        strHTML += GUIUtil::HtmlEscape(CBitcoinAddress(senderAddress).ToString());
-                                        if(wallet->mapAddressBook.find(senderAddress) !=  wallet->mapAddressBook.end())
-                                            if (!wallet->mapAddressBook[senderAddress].empty())
-                                            {
-                                                strHTML += " (" + tr("label") + ": " + GUIUtil::HtmlEscape(wallet->mapAddressBook[senderAddress]) + ")";
-                                            }
-                                        strHTML += "<br>";
+                                        // keystore-aware: resolve strict falcon sender ("f...", not "9")
+                                        CBitcoinAddress senderAddr = ResolveFalconScriptAddress(wallet, CBitcoinAddress(senderAddress));
+                                        if (std::find(addedAddresses.begin(), addedAddresses.end(), senderAddress) == addedAddresses.end())
+                                        {
+                                            addedAddresses.push_back(senderAddress);
+                                            strHTML += "<b>" + tr("From") + ":</b> ";
+                                            strHTML += GUIUtil::HtmlEscape(senderAddr.ToString());
+                                            if(wallet->mapAddressBook.find(senderAddr) !=  wallet->mapAddressBook.end())
+                                                if (!wallet->mapAddressBook[senderAddr].empty())
+                                                {
+                                                    strHTML += " (" + tr("label") + ": " + GUIUtil::HtmlEscape(wallet->mapAddressBook[senderAddr]) + ")";
+                                                }
+                                            strHTML += "<br>";
+                                        }
                                     }
                                 }
                                 strHTML += "<b>" + tr("To") + ":</b> ";
-                                strHTML += GUIUtil::HtmlEscape(CBitcoinAddress(address).ToString());
-                                if (!wallet->mapAddressBook[address].empty())
-                                    strHTML += " (" + tr("own address") + ", " + tr("label") + ": " + GUIUtil::HtmlEscape(wallet->mapAddressBook[address]) + ")";
+                                strHTML += GUIUtil::HtmlEscape(resolvedAddr.ToString());
+                                if (!wallet->mapAddressBook[resolvedAddr].empty())
+                                    strHTML += " (" + tr("own address") + ", " + tr("label") + ": " + GUIUtil::HtmlEscape(wallet->mapAddressBook[resolvedAddr]) + ")";
                                 else
                                     strHTML += " (" + tr("own address") + ")";
                                 strHTML += "<br>";
@@ -198,9 +204,10 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx)
                         if (ExtractDestination(txout.scriptPubKey, address))
                         {
                             strHTML += "<b>" + tr("To") + ":</b> ";
-                            if (wallet->mapAddressBook.count(address) && !wallet->mapAddressBook[address].empty())
-                                strHTML += GUIUtil::HtmlEscape(wallet->mapAddressBook[address]) + " ";
-                            strHTML += GUIUtil::HtmlEscape(CBitcoinAddress(address).ToString());
+                            CBitcoinAddress dest = ResolveFalconScriptAddress(wallet, CBitcoinAddress(address));
+                            if (wallet->mapAddressBook.count(dest) && !wallet->mapAddressBook[dest].empty())
+                                strHTML += GUIUtil::HtmlEscape(wallet->mapAddressBook[dest]) + " ";
+                            strHTML += GUIUtil::HtmlEscape(dest.ToString());
                             strHTML += "<br>";
                         }
                     }
@@ -287,9 +294,10 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx)
                             CTxDestination address;
                             if (ExtractDestination(vout.scriptPubKey, address))
                             {
-                                if (wallet->mapAddressBook.count(address) && !wallet->mapAddressBook[address].empty())
-                                    strHTML += GUIUtil::HtmlEscape(wallet->mapAddressBook[address]) + " ";
-                                strHTML += QString::fromStdString(CBitcoinAddress(address).ToString());
+                                CBitcoinAddress dest = ResolveFalconScriptAddress(wallet, CBitcoinAddress(address));
+                                if (wallet->mapAddressBook.count(dest) && !wallet->mapAddressBook[dest].empty())
+                                    strHTML += GUIUtil::HtmlEscape(wallet->mapAddressBook[dest]) + " ";
+                                strHTML += QString::fromStdString(dest.ToString());
                             }
                             strHTML = strHTML + " " + tr("Amount") + "=" + BitcoinUnits::formatWithUnit(BitcoinUnits::BTC, vout.nValue);
                             strHTML = strHTML + " IsMine=" + (wallet->IsMine(vout) ? tr("true") : tr("false")) + "</li>";

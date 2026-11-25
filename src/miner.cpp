@@ -7,6 +7,7 @@
 #include "txdb-leveldb.h"
 #include "miner.h"
 #include "kernel.h"
+#include "falconkey.h"
 #include "kernel_worker.h"
 #include "wallet.h"
 
@@ -120,7 +121,18 @@ std::shared_ptr<CBlock> CreateNewBlock(CWallet* pwallet, CTransaction *txCoinSta
     if (!fProofOfStake)
     {
         CReserveKey reservekey(pwallet);
-        txCoinBase.vout[0].scriptPubKey.SetDestination(reservekey.GetReservedKey().GetID());
+        bool fFalconPayout = false;
+        if (IsFalconZoneActive(GetAdjustedTime()))
+        {
+            CScript scriptFalconPayout;
+            if (pwallet->GetFalconChangeScript(scriptFalconPayout))
+            {
+                txCoinBase.vout[0].scriptPubKey = scriptFalconPayout;
+                fFalconPayout = true;
+            }
+        }
+        if (!fFalconPayout)
+            txCoinBase.vout[0].scriptPubKey.SetDestination(reservekey.GetReservedKey().GetID());
 
         // Add our coinbase tx as first transaction
         pblock->vtx.push_back(txCoinBase);
@@ -318,7 +330,7 @@ std::shared_ptr<CBlock> CreateNewBlock(CWallet* pwallet, CTransaction *txCoinSta
             if (nBlockSigOps + nTxSigOps >= MAX_BLOCK_SIGOPS)
                 continue;
 
-            if (!tx.ConnectInputs(txdb, mapInputs, mapTestPoolTmp, CDiskTxPos(1,1,1), pindexPrev, false, true, true, MANDATORY_SCRIPT_VERIFY_FLAGS))
+            if (!tx.ConnectInputs(txdb, mapInputs, mapTestPoolTmp, CDiskTxPos(1,1,1), pindexPrev, false, true, true, MANDATORY_SCRIPT_VERIFY_FLAGS | GetScriptFalconFlags(pindexPrev->nHeight + 1)))
                 continue;
             mapTestPoolTmp[tx.GetHash()] = CTxIndex(CDiskTxPos(1,1,1), tx.vout.size());
             swap(mapTestPool, mapTestPoolTmp);
@@ -360,7 +372,9 @@ std::shared_ptr<CBlock> CreateNewBlock(CWallet* pwallet, CTransaction *txCoinSta
 
         if (!fProofOfStake)
         {
-            pblock->vtx[0].vout[0].nValue = GetProofOfWorkReward(nFees);
+            // after FEE_BURN_SWITCH_TIME the fees are burned like in PoS blocks
+            pblock->vtx[0].vout[0].nValue = IsFeeBurnActive(GetAdjustedTime()) ?
+                    GetProofOfWorkReward(0) : GetProofOfWorkReward(nFees);
 			
             if (fDebug)
                 printf("CreateNewBlock(): PoW reward %" PRIu64 "\n", pblock->vtx[0].vout[0].nValue);
@@ -536,7 +550,11 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
     int64_t nBalance = pwallet->GetBalance();
 
     if (nBalance <= nReserveBalance)
+    {
+        printf("FillMap() : no stakable balance (balance=%s, reserve=%s)\n",
+               FormatMoney(nBalance).c_str(), FormatMoney(nReserveBalance).c_str());
         return false;
+    }
 
     uint32_t nTime = GetAdjustedTime();
 
@@ -546,12 +564,16 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
 
         CoinsSet setCoins;
         int64_t nValueIn = 0;
+        int nNotSupported = 0, nNotFalcon = 0, nNoIndex = 0, nTooYoung = 0, nNoModifier = 0;
         int nStakeMinConf = IsStakeWeightV2(nUpperTime) ? nCoinbaseMaturity : nCoinbaseMaturity * 10;
-        if (!pwallet->SelectCoinsSimple(nBalance - nReserveBalance, MIN_TX_FEE, MAX_MONEY, nUpperTime, nStakeMinConf, setCoins, nValueIn))
+        if (!pwallet->SelectCoinsSimple(nBalance - nReserveBalance, MIN_TX_FEE, MAX_MONEY, nUpperTime, nStakeMinConf, setCoins, nValueIn, IsFalconZoneActive((int64_t)nTime)))
             return error("FillMap() : SelectCoinsSimple failed");
 
         if (setCoins.empty())
+        {
+            printf("FillMap() : no coins passed the stake selection filters\n");
             return false;
+        }
 
         CBlock block;
         CTxIndex txindex;
@@ -570,27 +592,34 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
             if (!Solver(pcoin->first->vout[pcoin->second].scriptPubKey, whichType, vSolutions))
                 continue;
 
-            // Only support pay to public key and pay to address
-            if (whichType != TX_PUBKEY && whichType != TX_PUBKEYHASH)
-                continue;
+            // Only support pay to public key, pay to address and strict falcon scripts
+            if (whichType != TX_PUBKEY && whichType != TX_PUBKEYHASH && whichType != TX_SCRIPTHASH)
+            { nNotSupported++; continue; }
+            if (IsFalconZoneActive((int64_t)nTime))
+            {
+                if (!pwallet->IsFalconCoin(pcoin->first->vout[pcoin->second]))
+                { nNotFalcon++; continue; }
+            }
+            else if (whichType == TX_SCRIPTHASH)
+            { nNotFalcon++; continue; }
 
             // Load transaction index item
             if (!txdb.ReadTxIndex(pcoin->first->GetHash(), txindex))
-                continue;
+            { nNoIndex++; continue; }
 
             // Read block header
             if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
-                continue;
+            { nNoIndex++; continue; }
 
             // Only load coins meeting min age requirement
             unsigned int nMinAge = IsStakeWeightV2(nTime) ? nStakeMinAgeV2 : nStakeMinAge;
             if (nMinAge + block.nTime > nTime - nMaxStakeSearchInterval)
-                continue;
+            { nTooYoung++; continue; }
 
             // Get stake modifier
             uint64_t nStakeModifier = 0;
             if (!GetKernelStakeModifier(block.GetHash(), nStakeModifier))
-                continue;
+            { nNoModifier++; continue; }
 
             // Build static part of kernel
             CDataStream ssKernel(SER_GETHASH, 0);
@@ -602,6 +631,11 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
         }
 
         nStakeInputsMapSize = inputsMap.size();
+
+        if (inputsMap.empty())
+            printf("FillMap() : %d candidate coins produced no stakable kernels"
+                   " (unsupported-script=%d non-falcon=%d missing-index=%d too-young=%d no-modifier=%d)\n",
+                   (int)setCoins.size(), nNotSupported, nNotFalcon, nNoIndex, nTooYoung, nNoModifier);
 
         if (fDebug)
             printf("FillMap() : Map of %" PRIu64 " precalculated contexts has been created by stake miner\n", nStakeInputsMapSize);
@@ -660,9 +694,15 @@ void ThreadStakeMiner(void* parg)
 
     MidstateMap inputsMap;
     if (!FillMap(pwallet, GetAdjustedTime(), inputsMap))
-        return;
+    {
+        // Do not kill the miner thread on the empty initial map:
+        // the map is refilled on every new best block (below), so
+        // coins maturing or unlocking later will start staking.
+        printf("ThreadStakeMinter() : initial FillMap() failed, retrying on new blocks\n");
+    }
 
     bool fTrySync = true;
+    uint32_t nLastEmptyRefill = 0; // last periodic refill attempt (empty map)
 
     CBlockIndex* pindexPrev = pindexBest;
     uint32_t nBits = GetNextTargetRequired(pindexPrev, true);
@@ -717,10 +757,12 @@ void ThreadStakeMiner(void* parg)
                 inputsMap.erase(inputsMap.find(LuckyInput));
 
                 CKey key;
+                CFalconKey keyFalcon;
+                bool fFalconKernel = false;
                 CTransaction txCoinStake;
 
                 // Create new coinstake transaction
-                if (!pwallet->CreateCoinStake(LuckyInput.first, LuckyInput.second, solution.second, nBits, txCoinStake, key))
+                if (!pwallet->CreateCoinStake(LuckyInput.first, LuckyInput.second, solution.second, nBits, txCoinStake, key, keyFalcon, fFalconKernel))
                 {
                     std::string strMessage = _("Warning: Unable to create coinstake transaction, see debug.log for the details. Mining thread has been stopped.");
                     strMiscWarning = strMessage;
@@ -744,7 +786,10 @@ void ThreadStakeMiner(void* parg)
                 IncrementExtraNonce(pblock, pindexPrev, nExtraNonce);
 
                 // ... and sign it
-                if (!key.Sign(pblock->GetHash(), pblock->vchBlockSig))
+                bool fSigned = fFalconKernel ?
+                    keyFalcon.Sign(pblock->GetHash(), pblock->vchBlockSig) :
+                    key.Sign(pblock->GetHash(), pblock->vchBlockSig);
+                if (!fSigned)
                 {
                     std::string strMessage = _("Warning: Proof-of-Stake miner is unable to sign the block (locked wallet?). Mining thread has been stopped.");
                     strMiscWarning = strMessage;
@@ -771,6 +816,18 @@ void ThreadStakeMiner(void* parg)
                     // Clear existent data if FillMap failed
                     inputsMap.clear();
                 }
+            }
+            else if (inputsMap.empty() && GetAdjustedTime() - nLastEmptyRefill >= 60)
+            {
+                // Empty map retry when no new blocks arrive: without this
+                // the first stake of a freshly matured coin waits for a new
+                // block that only staking itself can produce (isolated or
+                // quiet chains would never resume). Retry once per minute.
+                if (FillMap(pwallet, GetAdjustedTime(), inputsMap))
+                {
+                    nBits = GetNextTargetRequired(pindexPrev, true);
+                }
+                nLastEmptyRefill = GetAdjustedTime();
             }
 
             Sleep(500);

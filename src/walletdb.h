@@ -62,6 +62,8 @@ public:
     bool WriteMalleableKey(const CMalleableKeyView& keyView, const CSecret& vchSecretH, const CKeyMetadata &keyMeta);
     bool WriteCryptedMalleableKey(const CMalleableKeyView& keyView, const std::vector<unsigned char>& vchCryptedSecretH, const CKeyMetadata &keyMeta);
     bool WriteCryptedKey(const CPubKey& key, const std::vector<unsigned char>& vchCryptedSecret, const CKeyMetadata &keyMeta);
+    bool WriteFalconKey(const CFalconKey& key);
+    bool WriteCryptedFalconKey(const CFalconKeyID& keyID, const std::pair<std::vector<unsigned char>, std::vector<unsigned char> >& vchCryptedSecret);
     bool WriteMasterKey(unsigned int nID, const CMasterKey& kMasterKey);
     bool EraseMasterKey(unsigned int nID);
     bool EraseCryptedKey(const CPubKey& key);

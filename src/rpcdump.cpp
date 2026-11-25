@@ -92,6 +92,72 @@ Value importprivkey(const Array& params, bool fHelp)
     return Value::null;
 }
 
+Value importfalconkey(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() < 1 || params.size() > 3)
+        throw runtime_error(
+            "importfalconkey <42falconkey> [label] [rescan=true]\n"
+            "Adds a post-quantum (Falcon-512) private key (as returned by dumpfalconkey) to your wallet\n"
+            "and restores the falcon address it backed.");
+
+    EnsureWalletIsUnlocked();
+
+    string strSecret = params[0].get_str();
+    string strLabel = "";
+    if (params.size() > 1)
+        strLabel = params[1].get_str();
+
+    // Whether to perform rescan after import
+    bool fRescan = true;
+    if (params.size() > 2)
+        fRescan = params[2].get_bool();
+
+    CBitcoinFalconKey falconSecret;
+    if (!falconSecret.SetString(strSecret))
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
+            strprintf("Invalid falcon key encoding (decoded version byte %d, this wallet expects %d; "
+                      "version 0 means invalid base58 or broken checksum - check the key was copied in full, "
+                      "without spaces or line breaks)",
+                      falconSecret.GetVersion(),
+                      128 + (fTestNet ? CBitcoinAddress::SCRIPT_ADDRESS_FALCON_TEST : CBitcoinAddress::SCRIPT_ADDRESS_FALCON)));
+
+    CFalconKey keyFalcon;
+    if (!falconSecret.GetKey(keyFalcon) || !keyFalcon.IsValid())
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key");
+
+    if (fWalletUnlockMintOnly) // ppcoin: no importfalconkey in mint-only mode
+        throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, "Wallet is unlocked for minting only.");
+
+    CScript scriptRedeem = BuildFalconRedeemScript(keyFalcon.GetID());
+    CBitcoinAddress addr;
+    addr.SetFalconScriptID(scriptRedeem.GetID());
+    {
+        LOCK2(cs_main, pwalletMain->cs_wallet);
+
+        // Don't throw error in case a key is already there
+        if (pwalletMain->HaveFalconKey(keyFalcon.GetID()))
+            return addr.ToString();
+
+        if (!pwalletMain->AddCScript(scriptRedeem))
+            throw JSONRPCError(RPC_WALLET_ERROR, "Error adding falcon script to wallet");
+
+        if (!pwalletMain->AddFalconKey(keyFalcon, addr))
+            throw JSONRPCError(RPC_WALLET_ERROR, "Error adding falcon key to wallet");
+
+        pwalletMain->MarkDirty();
+        pwalletMain->SetAddressBookName(addr, strLabel);
+
+        if (fRescan)
+        {
+            // whenever a key is imported, we need to scan the whole chain
+            pwalletMain->ScanForWalletTransactions(pindexGenesisBlock, true);
+            pwalletMain->ReacceptWalletTransactions();
+        }
+    }
+
+    return addr.ToString();
+}
+
 Value importaddress(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 1 || params.size() > 3)
@@ -227,6 +293,43 @@ Value dumpprivkey(const Array& params, bool fHelp)
     if (!pwalletMain->GetSecret(keyID, vchSecret, fCompressed))
         throw JSONRPCError(RPC_WALLET_ERROR, "Private key for address " + strAddress + " is not known");
     return CBitcoinSecret(vchSecret, fCompressed).ToString();
+}
+
+Value dumpfalconkey(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "dumpfalconkey <42falconaddress>\n"
+            "Reveals the post-quantum (Falcon-512) private key corresponding to <42falconaddress>.\n"
+            "The redeem script is deterministic from the key, so importfalconkey in another\n"
+            "wallet reproduces the same address.");
+
+    EnsureWalletIsUnlocked();
+
+    string strAddress = params[0].get_str();
+    CBitcoinAddress address;
+    if (!address.SetString(strAddress) || !address.IsValid())
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid 42 address");
+    if (fWalletUnlockMintOnly)
+        throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, "Wallet is unlocked for minting only.");
+    CScriptID scriptID;
+    if (!address.GetFalconScriptID(scriptID))
+        throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to a falcon script");
+
+    CScript subscript;
+    LOCK2(cs_main, pwalletMain->cs_wallet);
+    if (!pwalletMain->GetCScript(scriptID, subscript))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Redeem script for address " + strAddress + " is not known");
+
+    CFalconKeyID falconKeyID;
+    if (!IsStrictFalconScript(subscript, falconKeyID))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Address " + strAddress + " is not a strict falcon script");
+
+    CFalconKey keyFalcon;
+    if (!pwalletMain->GetFalconKey(falconKeyID, keyFalcon))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Private key for address " + strAddress + " is not known");
+
+    return CBitcoinFalconKey(keyFalcon).ToString();
 }
 
 Value dumpwallet(const Array& params, bool fHelp)

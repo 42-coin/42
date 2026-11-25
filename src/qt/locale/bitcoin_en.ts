@@ -141,6 +141,36 @@ Copyright © 2016-2025 The 42 developers</translation>
         <source>Could not write to file %1.</source>
         <translation>Could not write to file %1.</translation>
     </message>
+    <message>
+        <location filename="../forms/addressbookpage.ui" line="70"/>
+        <source>Create a new post-quantum (Falcon-512) address</source>
+        <translation>Create a new post-quantum (Falcon-512) address</translation>
+    </message>
+    <message>
+        <location filename="../forms/addressbookpage.ui" line="71"/>
+        <source>&amp;Falcon Address</source>
+        <translation>&amp;Falcon Address</translation>
+    </message>
+    <message>
+        <location filename="../addressbookpage.cpp" line="242"/>
+        <source>New Falcon address</source>
+        <translation>New Falcon address</translation>
+    </message>
+    <message>
+        <location filename="../addressbookpage.cpp" line="243"/>
+        <source>Label</source>
+        <translation>Label</translation>
+    </message>
+    <message>
+        <location filename="../addressbookpage.cpp" line="244"/>
+        <source>Error generating address</source>
+        <translation>Error generating address</translation>
+    </message>
+    <message>
+        <location filename="../addressbookpage.cpp" line="245"/>
+        <source>Failed to generate a Falcon-512 address.</source>
+        <translation>Failed to generate a Falcon-512 address.</translation>
+    </message>
 </context>
 <context>
     <name>AddressTableModel</name>
@@ -3050,6 +3080,11 @@ Reduce the number of addresses involved in the address creation.</translation>
         <location filename="../sendcoinsdialog.cpp" line="237"/>
         <source>Error: The transaction was rejected. This might happen if some of the coins in your wallet were already spent, such as if you used a copy of wallet.dat and coins were spent in the copy but not marked as spent here.</source>
         <translation>Error: The transaction was rejected. This might happen if some of the coins in your wallet were already spent, such as if you used a copy of wallet.dat and coins were spent in the copy but not marked as spent here.</translation>
+    </message>
+    <message>
+        <location filename="../sendcoinsdialog.cpp" line="214"/>
+        <source>The post-quantum zone is active: sending to legacy (non-Falcon) addresses is disabled. Use a Falcon address (f...) instead.</source>
+        <translation>The post-quantum zone is active: sending to legacy (non-Falcon) addresses is disabled. Use a Falcon address (f...) instead.</translation>
     </message>
 </context>
 <context>

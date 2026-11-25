@@ -2,6 +2,7 @@
 
 #include "wallet.h"
 #include "base58.h"
+#include "script.h"
 
 extern CWallet* pwalletMain;
 
@@ -123,7 +124,9 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(const CWallet *
                 {
                     // Sent to Bitcoin Address
                     sub.type = TransactionRecord::SendToAddress;
-                    sub.address = CBitcoinAddress(address).ToString();
+                    CBitcoinAddress dest(address);
+                    dest = ResolveFalconScriptAddress(pwalletMain, dest);
+                    sub.address = dest.ToString();
                 }
                 else
                 {

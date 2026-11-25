@@ -10,6 +10,8 @@
 #include <boost/version.hpp>
 #include <boost/filesystem.hpp>
 
+#include <iterator>
+
 
 static uint64_t nAccountingEntryNumber = 0;
 extern bool fWalletUnlockMintOnly;
@@ -97,6 +99,21 @@ bool CWalletDB::WriteCryptedKey(const CPubKey &key, const std::vector<unsigned c
         Erase(std::make_pair(std::string("key"), key));
         Erase(std::make_pair(std::string("wkey"), key));
     }
+    return true;
+}
+
+bool CWalletDB::WriteFalconKey(const CFalconKey& key)
+{
+    nWalletDBUpdated++;
+    return Write(std::make_pair(std::string("fkey"), key.GetID()), key, false);
+}
+
+bool CWalletDB::WriteCryptedFalconKey(const CFalconKeyID& keyID, const std::pair<std::vector<unsigned char>, std::vector<unsigned char> >& vchCryptedSecret)
+{
+    nWalletDBUpdated++;
+    if (!Write(std::make_pair(std::string("fckey"), keyID), vchCryptedSecret, false))
+        return false;
+    Erase(std::make_pair(std::string("fkey"), keyID));
     return true;
 }
 
@@ -338,6 +355,8 @@ class CWalletScanState {
 public:
     unsigned int nKeys;
     unsigned int nCKeys;
+    unsigned int nFKeys;
+    unsigned int nCFKeys;
     unsigned int nKeyMeta;
     bool fIsEncrypted;
     bool fAnyUnordered;
@@ -345,7 +364,7 @@ public:
     std::vector<uint256> vWalletUpgrade;
 
     CWalletScanState() {
-        nKeys = nCKeys = nKeyMeta = 0;
+        nKeys = nCKeys = nFKeys = nCFKeys = nKeyMeta = 0;
         fIsEncrypted = false;
         fAnyUnordered = false;
         nFileVersion = 0;
@@ -557,6 +576,38 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
             }
             wss.fIsEncrypted = true;
         }
+        else if (strType == "fkey")
+        {
+            wss.nFKeys++;
+            CFalconKeyID keyID;
+            ssKey >> keyID;
+            CFalconKey key;
+            ssValue >> key;
+            if (key.GetID() != keyID)
+            {
+                strErr = "Error reading wallet database: falcon key pubkey inconsistency";
+                return false;
+            }
+            if (!pwallet->LoadFalconKey(key))
+            {
+                strErr = "Error reading wallet database: LoadFalconKey failed";
+                return false;
+            }
+        }
+        else if (strType == "fckey")
+        {
+            wss.nCFKeys++;
+            CFalconKeyID keyID;
+            ssKey >> keyID;
+            std::pair<std::vector<unsigned char>, std::vector<unsigned char> > vchCryptedSecret;
+            ssValue >> vchCryptedSecret;
+            if (!pwallet->LoadCryptedFalconKey(keyID, vchCryptedSecret.first, vchCryptedSecret.second))
+            {
+                strErr = "Error reading wallet database: LoadCryptedFalconKey failed";
+                return false;
+            }
+            wss.fIsEncrypted = true;
+        }
         else if (strType == "malmeta")
         {
             std::string strKeyView;
@@ -638,7 +689,8 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
 static bool IsKeyType(const std::string& strType)
 {
     return (strType== "key" || strType == "wkey" ||
-            strType == "mkey" || strType == "ckey" || strType == "malpair" || strType == "malcpair");
+            strType == "mkey" || strType == "ckey" || strType == "malpair" || strType == "malcpair" ||
+            strType == "fkey" || strType == "fckey");
 }
 
 DBErrors CWalletDB::LoadWallet(CWallet* pwallet)

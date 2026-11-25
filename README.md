@@ -12,7 +12,7 @@ Specifications
 - Number of transaction confirmation: 7
 - Number of block confirmation: 42
 - PoW algo type: Scrypt
-- PoW reward: 0 coin + tx fees
+- PoW reward: 0 coin + tx fees (transaction fees collected until 01 Jan 2027, burned afterwards)
 - PoW target spacing: 21 minutes
 - PoS reward: 0 coin & destroy tx fees (for deflation)
 - Min stake age: 42 hours (1 hour in the stake weight v2 era)

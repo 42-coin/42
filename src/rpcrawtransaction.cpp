@@ -50,7 +50,7 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, Object& out, bool fIncludeH
         {
             Array a;
             for (const CTxDestination& addr : addresses)
-                a.push_back(CBitcoinAddress(addr).ToString());
+                a.push_back(ResolveFalconScriptAddress(pwalletMain, CBitcoinAddress(addr)).ToString());
             out.push_back(Pair("addresses", a));
         }
     }

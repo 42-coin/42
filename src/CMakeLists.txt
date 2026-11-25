@@ -104,6 +104,8 @@ set(generic_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_worker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernelrecord.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/falconkey.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/falconverify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/key.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/keystore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -188,6 +190,10 @@ list(APPEND ALL_DEFINITIONS HAVE_BUILD_INFO USE_IPV6 BOOST_SPIRIT_THREADSAFE)
 
 add_executable(42d ${ALL_SOURCES})
 
+set(liboqs_DIR "/usr/local/lib/cmake/liboqs")
+# Consensus-tested with liboqs 0.16.0; other versions must pass the startup self-test
+find_package(liboqs REQUIRED)
+
 target_precompile_headers(42d
   PRIVATE
     <algorithm>
@@ -237,7 +243,8 @@ set(CMAKE_EXE_LINKER_FLAGS ${ALL_LINKER_FLAGS} CACHE INTERNAL "")
 endif()
 
 target_include_directories(42d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/json ${BerkeleyDB_INC} ${CMAKE_CURRENT_SOURCE_DIR}/additional/leveldb/helpers ${Boost_INCLUDE_DIRS})
-target_link_libraries(42d ${ALL_LIBRARIES})
+
+target_link_libraries(42d ${ALL_LIBRARIES} OQS::oqs)
 
 target_compile_features(42d PUBLIC cxx_std_17)
 set_property(TARGET 42d PROPERTY CXX_STANDARD 17)

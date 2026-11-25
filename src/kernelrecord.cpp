@@ -39,18 +39,28 @@ vector<KernelRecord> KernelRecord::decomposeOutput(const CWallet *wallet, const 
         {
             CTxOut txOut = wtx.vout[nOut];
             if( wallet->IsMine(txOut) ) {
-                CTxDestination address;
+                CBitcoinAddress addrStore;
                 std::string addrStr;
 
-                if (ExtractDestination(txOut.scriptPubKey, address))
+                // keystore-aware extraction: resolves strict falcon redeem
+                // scripts into falcon addresses (f...), not legacy "9"
+                if (ExtractAddress(*wallet, txOut.scriptPubKey, addrStore))
                 {
-                    // Sent to Bitcoin Address
-                    addrStr = CBitcoinAddress(address).ToString();
+                    addrStr = addrStore.ToString();
                 }
                 else
                 {
-                    // Sent to IP, or other non-address transaction like OP_EVAL
-                    addrStr = mapValue["to"];
+                    CTxDestination address;
+                    if (ExtractDestination(txOut.scriptPubKey, address))
+                    {
+                        // Sent to Bitcoin Address
+                        addrStr = CBitcoinAddress(address).ToString();
+                    }
+                    else
+                    {
+                        // Sent to IP, or other non-address transaction like OP_EVAL
+                        addrStr = mapValue["to"];
+                    }
                 }
 
                 parts.push_back(KernelRecord(hash, nTime, addrStr, txOut.nValue, wtx.IsSpent(nOut)));

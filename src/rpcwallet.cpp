@@ -140,6 +140,29 @@ Value getnewaddress(const Array& params, bool fHelp)
     return address.ToString();
 }
 
+Value getnewfalconaddress(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() > 1)
+        throw std::runtime_error(
+            "getnewfalconaddress [account]\n"
+            "Returns a new post-quantum (Falcon-512) 42 address for receiving payments.  "
+            "If [account] is specified (recommended), it is added to the address book "
+            "so payments received with the address will be credited to [account].");
+
+    std::string strAccount;
+    if (params.size() > 0)
+        strAccount = AccountFromValue(params[0]);
+
+    CFalconKey newKey;
+    CBitcoinAddress address;
+    if (!pwalletMain->GenerateNewFalconKey(newKey, address))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Error: failed to generate falcon key");
+
+    pwalletMain->SetAddressBookName(address, strAccount);
+
+    return address.ToString();
+}
+
 
 CBitcoinAddress GetAccountAddress(std::string strAccount, bool bForceNew=false)
 {
@@ -331,6 +354,18 @@ Value sendtoaddress(const Array& params, bool fHelp)
         scriptPubKey.SetAddress(address);
     else
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid 42 address");
+
+    // Remember falcon recipients (the displayed address version is not
+    // recoverable from the on-chain P2SH output otherwise).
+    if (address.IsFalconScript())
+    {
+        std::string strLabel = "";
+        if (params.size() > 3 && params[3].type() != null_type)
+            strLabel = params[3].get_str();
+        LOCK(pwalletMain->cs_wallet);
+        if (!pwalletMain->mapAddressBook.count(address))
+            pwalletMain->SetAddressBookName(address, strLabel);
+    }
 
     // Amount
     int64_t nAmount = AmountFromValue(params[1]);
@@ -773,6 +808,15 @@ Value sendmany(const Array& params, bool fHelp)
         if (!address.IsValid())
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, std::string("Invalid 42 address: ")+s.name_);
 
+        // Remember falcon recipients (the displayed address version is not
+        // recoverable from the on-chain P2SH output otherwise).
+        if (address.IsFalconScript())
+        {
+            LOCK(pwalletMain->cs_wallet);
+            if (!pwalletMain->mapAddressBook.count(address))
+                pwalletMain->SetAddressBookName(address, strAccount);
+        }
+
         if (!address.IsPair())
         {
             if (setAddress.count(address))
@@ -960,7 +1004,7 @@ Value ListReceived(const Array& params, bool fByAccounts)
             if (!ExtractDestination(txout.scriptPubKey, address) || !IsMine(*pwalletMain, address))
                 continue;
 
-            tallyitem& item = mapTally[address];
+            tallyitem& item = mapTally[ResolveFalconScriptAddress(pwalletMain, CBitcoinAddress(address))];
             item.nAmount += txout.nValue;
             item.nConf = std::min(item.nConf, nDepth);
         }

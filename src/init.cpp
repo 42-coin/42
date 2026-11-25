@@ -3,6 +3,7 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include "init.h"
+#include "falconverify.h"
 #include "wallet.h"
 #include "base58.h"
 #include "txdb-leveldb.h"
@@ -541,6 +542,7 @@ bool AppInit2()
     printf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
     printf("42 version %s (%s)\n", FormatFullVersion().c_str(), CLIENT_DATE.c_str());
     printf("Using OpenSSL version %s\n", SSLeay_version(SSLEAY_VERSION));
+    printf("Using liboqs version %s\n", FalconLibVersion().c_str());
     if (!fLogTimestamps)
         printf("Startup time: %s\n", DateTimeStrFormat("%x %H:%M:%S", GetTime()).c_str());
     printf("Default data directory %s\n", GetDefaultDataDir().string().c_str());
@@ -591,6 +593,15 @@ bool AppInit2()
         if (r == CDBEnv::RECOVER_FAIL)
             return InitError(_("wallet.dat corrupt, salvage failed"));
     }
+
+    // ********************************************************* Step 5b: falcon self-test
+
+    std::string strFalconError;
+    if (!SelfTestFalconVerification(strFalconError))
+        return InitError(strprintf("Falcon-512 self-test failed: %s. A divergent verification result could break consensus, refusing to start.", strFalconError.c_str()));
+    printf("Falcon-512 self-test passed\n");
+    if (FalconLibVersion() != "0.16.0")
+        printf("Warning: liboqs version %s differs from the consensus-tested 0.16.0.\n", FalconLibVersion().c_str());
 
     // ********************************************************* Step 6: network initialization
 

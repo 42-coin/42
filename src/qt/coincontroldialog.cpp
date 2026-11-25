@@ -485,6 +485,8 @@ void CoinControlDialog::updateLabels(WalletModel *model, QWidget* dialog)
                 else
                     nBytesInputs += 148; // in all error cases, simply assume 148 here
             }
+            else if (address.IsFalconScript())
+                nBytesInputs += 1669; // falcon scriptSig: ~666B sig + 897B pubkey + 59B redeem, split into 5 chunks
         }
     }
 
@@ -505,6 +507,14 @@ void CoinControlDialog::updateLabels(WalletModel *model, QWidget* dialog)
         int64_t nMinFee = txDummy.GetMinFee(1, fAllowFree, GMF_SEND, nBytes);
 
         nPayFee = max(nFee, nMinFee);
+
+        // The expected change below CENT triggers a dust penalty in
+        // GetMinFee (txDummy above has no change output, so add it here):
+        // without it the displayed fee sits 1e-8 below the fee the real
+        // CreateTransaction ends up requiring, and "amount + fee" fails.
+        if (nPayAmount > 0 && nAmount - nPayFee - nPayAmount > 0 &&
+            nAmount - nPayFee - nPayAmount < CENT)
+            nPayFee += MIN_TX_FEE;
 
         if (nPayAmount > 0)
         {
@@ -654,6 +664,8 @@ void CoinControlDialog::updateView()
                     if (outputAddress.GetKeyID(keyid) && model->getPubKey(keyid, pubkey) && !pubkey.IsCompressed())
                         nInputSize = 180;
                 }
+                else if (outputAddress.IsFalconScript())
+                    nInputSize = 1669; // falcon scriptSig: ~666B sig + 897B pubkey + 59B redeem, split into 5 chunks
             }
 
             // label

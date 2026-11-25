@@ -2,6 +2,9 @@
 #include "ui_addressbookpage.h"
 
 #include "addresstablemodel.h"
+#include "init.h"
+#include "base58.h"
+#include "wallet.h"
 #include "optionsmodel.h"
 #include "bitcoingui.h"
 #include "editaddressdialog.h"
@@ -9,9 +12,13 @@
 #include "guiutil.h"
 #include "qrcodedialog.h"
 
+#include "walletmodel.h"
+
 #include <QSortFilterProxyModel>
 #include <QClipboard>
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QMenu>
 
 
@@ -47,6 +54,7 @@ AddressBookPage::AddressBookPage(Mode mode, Tabs tab, QWidget *parent) :
     case SendingTab:
         ui->labelExplanation->setVisible(false);
         ui->deleteButton->setVisible(true);
+        ui->newFalconButton->setVisible(false);
         ui->signMessage->setVisible(false);
         ui->verifyMessage->setVisible(true);
         break;
@@ -222,6 +230,53 @@ void AddressBookPage::on_newAddressButton_clicked()
     {
         newAddressToSelect = dlg.getAddress();
     }
+}
+
+void AddressBookPage::on_newFalconButton_clicked()
+{
+    if(!model)
+        return;
+
+    QInputDialog labelDlg(this);
+    labelDlg.setWindowTitle(tr("New Falcon address"));
+    labelDlg.setLabelText(tr("Label"));
+    labelDlg.setTextEchoMode(QLineEdit::Normal);
+    // Same width as the regular new-address dialog
+    {
+        EditAddressDialog editDlg(tab == SendingTab ?
+                                  EditAddressDialog::NewSendingAddress :
+                                  EditAddressDialog::NewReceivingAddress, this);
+        labelDlg.resize(editDlg.width(), labelDlg.sizeHint().height());
+    }
+    if(labelDlg.exec() != QDialog::Accepted)
+        return;
+    QString strLabel = labelDlg.textValue();
+
+    WalletModel::UnlockContext ctx(model->getWalletModel()->requestUnlock());
+    if(!ctx.isValid())
+    {
+        QMessageBox::critical(this, tr("Error generating address"),
+                              tr("Failed to generate a Falcon-512 address."),
+                              QMessageBox::Ok, QMessageBox::Ok);
+        return;
+    }
+
+    CFalconKey newFalconKey;
+    CBitcoinAddress newAddress;
+    if(!pwalletMain->GenerateNewFalconKey(newFalconKey, newAddress))
+    {
+        QMessageBox::critical(this, tr("Error generating address"),
+                              tr("Failed to generate a Falcon-512 address."),
+                              QMessageBox::Ok, QMessageBox::Ok);
+        return;
+    }
+
+    {
+        LOCK(pwalletMain->cs_wallet);
+        pwalletMain->SetAddressBookName(newAddress, strLabel.toStdString());
+    }
+
+    newAddressToSelect = newAddress.ToString().c_str();
 }
 
 void AddressBookPage::on_deleteButton_clicked()

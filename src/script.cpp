@@ -6,12 +6,15 @@
 #include "script.h"
 #include "keystore.h"
 #include "key.h"
+#include "falconverify.h"
 #include "main.h"
 #include "random.h"
 #include "util.h"
 #include "base58.h"
 
 #include <shared_mutex>
+
+uint256 SignatureHash(CScript scriptCode, const CTransaction& txTo, unsigned int nIn, int nHashType);
 
 bool CheckSig(std::vector<unsigned char> vchSig, const std::vector<unsigned char> &vchPubKey, const CScript &scriptCode, const CTransaction& txTo, unsigned int nIn, int nHashType, int flags);
 
@@ -101,6 +104,7 @@ const char* GetTxnOutputType(txnouttype t)
     case TX_SCRIPTHASH: return "scripthash";
     case TX_MULTISIG: return "multisig";
     case TX_NULL_DATA: return "nulldata";
+    case TX_FALCON: return "falcon";
     }
     return NULL;
 }
@@ -497,7 +501,38 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                 //
                 case OP_NOP:
                 case OP_NOP1: case OP_NOP4: case OP_NOP5:
-                case OP_NOP6: case OP_NOP7: case OP_NOP8: case OP_NOP9: case OP_NOP10:
+                case OP_NOP6: case OP_NOP7: case OP_NOP8: case OP_NOP9:
+                break;
+
+                case OP_NOP10:
+                {
+                    CScript::const_iterator pc2 = pc;
+                    opcodetype opcodeNext;
+                    std::vector<unsigned char> vchNext;
+                    if ((flags & SCRIPT_VERIFY_FALCON) &&
+                        script.GetOp(pc2, opcodeNext, vchNext) &&
+                        opcodeNext == OP_FALCONMARKER)
+                    {
+                        if (stack.size() < 5)
+                            return false;
+                        // Phoenix scriptSig layout: [sig2, sig1, key2, key1]
+                        // below the 32-byte key id pushed by the redeem script.
+                        // Reassemble the signature and the public key.
+                        valtype vchFalconSig = stacktop(-4);
+                        vchFalconSig.insert(vchFalconSig.end(), stacktop(-5).begin(), stacktop(-5).end());
+                        valtype vchFalconPubKey = stacktop(-2);
+                        vchFalconPubKey.insert(vchFalconPubKey.end(), stacktop(-3).begin(), stacktop(-3).end());
+                        const valtype& vchKid = stacktop(-1);
+                        if (vchFalconSig.empty() || vchFalconSig.size() > FALCON512_SIG_MAX_SIZE ||
+                            vchFalconPubKey.size() != FALCON512_PUBKEY_SIZE ||
+                            vchKid.size() != sizeof(uint256))
+                            return false;
+                        CScript scriptCode(pbegincodehash, pend);
+                        uint256 falconHash = SignatureHash(scriptCode, txTo, nIn, SIGHASH_ALL);
+                        if (!VerifyFalconScriptSignature(vchKid, vchFalconPubKey, vchFalconSig, falconHash.begin(), sizeof(uint256)))
+                            return false;
+                    }
+                }
                 break;
 
                 case OP_IF:
@@ -1336,6 +1371,15 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
 
     vSolutionsRet.clear();
 
+    CFalconKeyID falconKeyID;
+    if (IsStrictFalconScript(scriptPubKey, falconKeyID))
+    {
+        typeRet = TX_FALCON;
+        std::vector<unsigned char> hashBytes(falconKeyID.begin(), falconKeyID.end());
+        vSolutionsRet.push_back(hashBytes);
+        return true;
+    }
+
     // Shortcut for pay-to-script-hash, which are more constrained than the other types:
     // it is always OP_HASH160 20 [20 byte hash] OP_EQUAL
     if (scriptPubKey.IsPayToScriptHash())
@@ -1548,13 +1592,88 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, const uint25
         }
         return true;
     case TX_SCRIPTHASH:
-        return keystore.GetCScript(uint160(vSolutions[0]), scriptSigRet);
+        if (!keystore.GetCScript(uint160(vSolutions[0]), scriptSigRet))
+        {
+            error("SignSignature(): redeem script not found in wallet for P2SH input");
+            return false;
+        }
+        return true;
 
     case TX_MULTISIG:
         scriptSigRet << OP_0; // work around CHECKMULTISIG bug
         return (SignN(vSolutions, keystore, hash, nHashType, scriptSigRet));
+    case TX_FALCON:
+        {
+            CFalconKey keyFalcon;
+            CFalconKeyID falconKeyID((uint256(vSolutions[0])));
+            if (!keystore.GetFalconKey(falconKeyID, keyFalcon))
+            {
+                error("SignSignature(): unable to load falcon key for script input");
+                return false;
+            }
+            std::vector<unsigned char> vchFalconSig;
+            if (!keyFalcon.Sign(hash, vchFalconSig))
+            {
+                error("SignSignature(): falcon signing failed");
+                return false;
+            }
+
+            // The signature and public key exceed the 520-byte script element
+            // limit, so each is split into two chunks pushed in reverse order
+            // (phoenix layout). The redeem script is appended by SignSignature
+            // and the 32-byte key id push of the redeem script lands on top
+            // of the stack where the strict verification expects them.
+            const std::vector<unsigned char>& vchFalconPubKey = keyFalcon.GetPubKey();
+            std::vector<unsigned char> vchSig1, vchSig2, vchKey1, vchKey2;
+            CFalconKey::SplitForScript(vchFalconSig, vchSig1, vchSig2);
+            CFalconKey::SplitForScript(vchFalconPubKey, vchKey1, vchKey2);
+            scriptSigRet << vchSig2 << vchSig1 << vchKey2 << vchKey1;
+        }
+        return true;
     }
     return false;
+}
+
+CScript BuildFalconRedeemScript(const CFalconKeyID& keyID)
+{
+    std::vector<unsigned char> vchSalt(keyID.begin(), keyID.begin() + 16);
+    std::vector<unsigned char> vchKid(keyID.begin(), keyID.end());
+    CScript script;
+    script << vchSalt << OP_DROP;
+    script << vchKid;
+    script << OP_FALCONVERIFY << OP_FALCONMARKER;
+    script << OP_DROP << OP_DROP << OP_DROP << OP_DROP << OP_DROP;
+    script << OP_1;
+    return script;
+}
+
+bool IsStrictFalconScript(const CScript& script, CFalconKeyID& keyIDRet)
+{
+    CScript::const_iterator pc = script.begin();
+    opcodetype opcode;
+    std::vector<unsigned char> vch;
+
+    if (!script.GetOp(pc, opcode, vch) || vch.size() != 16)
+        return false;
+    if (!script.GetOp(pc, opcode, vch) || opcode != OP_DROP)
+        return false;
+    if (!script.GetOp(pc, opcode, vch) || vch.size() != 32)
+        return false;
+    std::vector<unsigned char> vchKid = vch;
+    if (!script.GetOp(pc, opcode, vch) || opcode != OP_FALCONVERIFY)
+        return false;
+    if (!script.GetOp(pc, opcode, vch) || opcode != OP_FALCONMARKER)
+        return false;
+    for (int i = 0; i < 5; i++)
+        if (!script.GetOp(pc, opcode, vch) || opcode != OP_DROP)
+            return false;
+    if (!script.GetOp(pc, opcode, vch) || opcode != OP_1)
+        return false;
+    if (pc != script.end())
+        return false;
+
+    keyIDRet = CFalconKeyID((uint256(vchKid)));
+    return true;
 }
 
 int ScriptSigArgsExpected(txnouttype t, const std::vector<std::vector<unsigned char> >& vSolutions)
@@ -1576,6 +1695,10 @@ int ScriptSigArgsExpected(txnouttype t, const std::vector<std::vector<unsigned c
         return vSolutions[0][0] + 1;
     case TX_SCRIPTHASH:
         return 1; // doesn't include args needed by the script
+    case TX_FALCON:
+        // 4 chunks pushed by Solver; the redeem script push is added
+        // separately by SignSignature for P2SH spends (base count 1).
+        return 4;
     }
     return -1;
 }
@@ -1697,6 +1820,13 @@ isminetype IsMine(const CKeyStore &keystore, const CScript& scriptPubKey)
             return MINE_SPENDABLE;
         break;
     }
+    case TX_FALCON:
+    {
+        CFalconKeyID falconKeyID((uint256(vSolutions[0])));
+        if (keystore.HaveFalconKey(falconKeyID))
+            return MINE_SPENDABLE;
+        break;
+    }
     }
 
     if (keystore.HaveWatchOnly(scriptPubKey))
@@ -1759,7 +1889,19 @@ bool ExtractAddress(const CKeyStore &keystore, const CScript& scriptPubKey, CBit
     }
     else if (whichType == TX_SCRIPTHASH)
     {
-        addressRet = CBitcoinAddress(CScriptID(uint160(vSolutions[0])));
+        CScriptID scriptID = CScriptID(uint160(vSolutions[0]));
+        CScript subscript;
+        CFalconKeyID falconKeyID;
+        if (keystore.GetCScript(scriptID, subscript) && IsStrictFalconScript(subscript, falconKeyID))
+        {
+            CBitcoinAddress falconAddress;
+            falconAddress.SetFalconScriptID(scriptID);
+            addressRet = falconAddress;
+        }
+        else
+        {
+            addressRet = CBitcoinAddress(scriptID);
+        }
         return true;
     }
     // Multisig txns have more than one address...
@@ -1909,7 +2051,11 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
             Solver(keystore, subscript, hash2, nHashType, txin.scriptSig, subType) && subType != TX_SCRIPTHASH;
         // Append serialized subscript whether or not it is completely signed:
         txin.scriptSig << static_cast<valtype>(subscript);
-        if (!fSolved) return false;
+        if (!fSolved)
+        {
+            error("SignSignature(): failed to solve subscript (type %d)", (int)subType);
+            return false;
+        }
     }
 
     // Test solution
@@ -2005,6 +2151,7 @@ static CScript CombineSignatures(const CScript& scriptPubKey, const CTransaction
     case TX_PUBKEY:
     case TX_PUBKEY_DROP:
     case TX_PUBKEYHASH:
+    case TX_FALCON:
         // Signatures are bigger than placeholders or empty scripts:
         if (sigs1.empty() || sigs1[0].empty())
             return PushAll(sigs2);
@@ -2053,6 +2200,10 @@ CScript CombineSignatures(const CScript& scriptPubKey, const CTransaction& txTo,
 
 unsigned int CScript::GetSigOpCount(bool fAccurate) const
 {
+    CFalconKeyID falconKeyID;
+    if (IsStrictFalconScript(*this, falconKeyID))
+        return 1;
+
     unsigned int n = 0;
     const_iterator pc = begin();
     opcodetype lastOpcode = OP_INVALIDOPCODE;

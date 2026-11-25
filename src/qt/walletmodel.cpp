@@ -167,6 +167,11 @@ WalletModel::SendCoinsReturn WalletModel::sendCoins(const QList<SendCoinsRecipie
         {
             return InvalidAddress;
         }
+        if(IsFalconZoneActive(GetAdjustedTime()) &&
+           !CBitcoinAddress(rcp.address.toStdString()).IsFalconScript())
+        {
+            return FalconAddressRequired;
+        }
         setAddress.insert(rcp.address);
 
         if(rcp.amount <= 0)

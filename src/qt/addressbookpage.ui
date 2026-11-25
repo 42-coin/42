@@ -65,6 +65,16 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="newFalconButton">
+       <property name="toolTip">
+        <string>Create a new post-quantum (Falcon-512) address</string>
+       </property>
+       <property name="text">
+        <string>&amp;Falcon Address</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="copyToClipboard">
        <property name="toolTip">
         <string>Copy the currently selected address to the system clipboard</string>

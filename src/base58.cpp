@@ -247,7 +247,7 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
         vchData.resize(vchTemp.size() - 1);
         if (!vchData.empty())
             memcpy(&vchData[0], &vchTemp[1], vchData.size());
-        OPENSSL_cleanse(&vchTemp[0], vchData.size());
+        OPENSSL_cleanse(&vchTemp[0], vchTemp.size());
         return true;
     }
 
@@ -296,6 +296,11 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
         return true;
     }
 
+    bool CBitcoinAddress::SetFalconScriptID(const CScriptID &id) {
+        SetData(fTestNet ? SCRIPT_ADDRESS_FALCON_TEST : SCRIPT_ADDRESS_FALCON, &id, 20);
+        return true;
+    }
+
     bool CBitcoinAddress::Set(const CTxDestination &dest)
     {
         return std::visit(CBitcoinAddressVisitor(this), dest);
@@ -334,6 +339,10 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
                 nExpectedSize = 20; // Hash of CScript
                 fExpectTestNet = false;
                 break;
+            case SCRIPT_ADDRESS_FALCON:
+                nExpectedSize = 20; // Hash of strict falcon redeem script
+                fExpectTestNet = false;
+                break;
 
             case PUBKEY_PAIR_ADDRESS_TEST:
                 nExpectedSize = 68;
@@ -345,6 +354,10 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
                 fExpectTestNet = true;
                 break;
             case SCRIPT_ADDRESS_TEST:
+                nExpectedSize = 20;
+                fExpectTestNet = true;
+                break;
+            case SCRIPT_ADDRESS_FALCON_TEST:
                 nExpectedSize = 20;
                 fExpectTestNet = true;
                 break;
@@ -368,6 +381,33 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
             return fSeemsSane;
     }
 
+    bool CBitcoinAddress::GetFalconScriptID(CScriptID &id) const {
+        if (!IsValid())
+            return false;
+        switch (nVersion) {
+        case SCRIPT_ADDRESS_FALCON:
+        case SCRIPT_ADDRESS_FALCON_TEST: {
+            uint160 scriptId;
+            memcpy(&scriptId, &vchData[0], 20);
+            id = CScriptID(scriptId);
+            return true;
+        }
+        default: return false;
+        }
+    }
+
+    bool CBitcoinAddress::IsFalconScript() const {
+        if (!IsValid())
+            return false;
+        switch (nVersion) {
+        case SCRIPT_ADDRESS_FALCON:
+        case SCRIPT_ADDRESS_FALCON_TEST: {
+            return true;
+        }
+        default: return false;
+        }
+    }
+
     CTxDestination CBitcoinAddress::Get() const {
         if (!IsValid())
             return CNoDestination();
@@ -379,7 +419,9 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
             return CKeyID(id);
         }
         case SCRIPT_ADDRESS:
-        case SCRIPT_ADDRESS_TEST: {
+        case SCRIPT_ADDRESS_TEST:
+        case SCRIPT_ADDRESS_FALCON:
+        case SCRIPT_ADDRESS_FALCON_TEST: {
             uint160 id;
             memcpy(&id, &vchData[0], 20);
             return CScriptID(id);
@@ -416,7 +458,9 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
             return false;
         switch (nVersion) {
         case SCRIPT_ADDRESS:
-        case SCRIPT_ADDRESS_TEST: {
+        case SCRIPT_ADDRESS_TEST:
+        case SCRIPT_ADDRESS_FALCON:
+        case SCRIPT_ADDRESS_FALCON_TEST: {
             return true;
         }
         default: return false;
@@ -495,4 +539,50 @@ bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>& vchRe
     CBitcoinSecret::CBitcoinSecret(const CSecret& vchSecret, bool fCompressed)
     {
         SetSecret(vchSecret, fCompressed);
+    }
+
+    void CBitcoinFalconKey::SetKey(const CFalconKey& key)
+    {
+        assert(key.IsValid());
+        SetData(128 + (fTestNet ? CBitcoinAddress::SCRIPT_ADDRESS_FALCON_TEST : CBitcoinAddress::SCRIPT_ADDRESS_FALCON), &key.GetPubKey()[0], key.GetPubKey().size());
+        vchData.insert(vchData.end(), key.GetPrivKey().begin(), key.GetPrivKey().end());
+    }
+
+    bool CBitcoinFalconKey::GetKey(CFalconKey& keyOut) const
+    {
+        if (!IsValid() || vchData.size() != FALCON512_PUBKEY_SIZE + FALCON512_PRIVKEY_SIZE)
+            return false;
+        CFalconPrivKey vchPrivKey(vchData.begin() + FALCON512_PUBKEY_SIZE, vchData.end());
+        if (!keyOut.SetPrivKey(vchPrivKey))
+            return false;
+        keyOut.SetPubKey(std::vector<unsigned char>(vchData.begin(), vchData.begin() + FALCON512_PUBKEY_SIZE));
+        return keyOut.IsValid();
+    }
+
+    bool CBitcoinFalconKey::IsValid() const
+    {
+        bool fExpectTestNet = false;
+        switch(nVersion)
+        {
+            case (128 + CBitcoinAddress::SCRIPT_ADDRESS_FALCON):
+                break;
+
+            case (128 + CBitcoinAddress::SCRIPT_ADDRESS_FALCON_TEST):
+                fExpectTestNet = true;
+                break;
+
+            default:
+                return false;
+        }
+        return fExpectTestNet == fTestNet && vchData.size() == FALCON512_PUBKEY_SIZE + FALCON512_PRIVKEY_SIZE;
+    }
+
+    bool CBitcoinFalconKey::SetString(const char* pszSecret)
+    {
+        return CBase58Data::SetString(pszSecret) && IsValid();
+    }
+
+    bool CBitcoinFalconKey::SetString(const std::string& strSecret)
+    {
+        return SetString(strSecret.c_str());
     }
