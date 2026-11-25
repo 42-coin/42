@@ -2114,7 +2114,7 @@ void CWallet::SetNull()
     nLastResend = 0;
     nOrderPosNext = 0;
     nKernelsTried = 0;
-    nCoinDaysTried = 0;
+    dCoinDaysTried = 0.0;
     nTimeFirstKey = 0;
 }
 

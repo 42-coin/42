@@ -64,6 +64,8 @@ Value getmininginfo(const Array& params, bool fHelp)
     obj.push_back(Pair("pooledtx",      (uint64_t)mempool.size()));
 
     obj.push_back(Pair("stakeinputs",   (uint64_t)nStakeInputsMapSize));
+    obj.push_back(Pair("stakekernels",  (uint64_t)pwalletMain->GetStakeKernelsTried()));
+    obj.push_back(Pair("stakecoindays", pwalletMain->GetStakeCoinDaysTried()));
     obj.push_back(Pair("stakeinterest", (uint64_t)COIN_YEAR_REWARD));
     obj.push_back(Pair("stakeweightv2time", (uint64_t)nStakeWeightV2Time));
     obj.push_back(Pair("stakeweightv2active", IsStakeWeightV2((unsigned int)GetAdjustedTime())));

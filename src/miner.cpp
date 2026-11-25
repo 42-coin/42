@@ -645,7 +645,7 @@ bool FillMap(CWallet *pwallet, uint32_t nUpperTime, MidstateMap &inputsMap)
 }
 
 // Scan inputs map in order to find a solution
-bool ScanMap(const MidstateMap &inputsMap, uint32_t nBits, MidstateMap::key_type &LuckyInput, std::pair<uint256, uint32_t> &solution)
+bool ScanMap(const MidstateMap &inputsMap, uint32_t nBits, MidstateMap::key_type &LuckyInput, std::pair<uint256, uint32_t> &solution, CWallet *pwallet)
 {
     static uint32_t nLastCoinStakeSearchTime = GetAdjustedTime(); // startup timestamp
     uint32_t nSearchTime = GetAdjustedTime();
@@ -659,9 +659,21 @@ bool ScanMap(const MidstateMap &inputsMap, uint32_t nBits, MidstateMap::key_type
         interval.second = nSearchTime - std::min(nSearchTime-nLastCoinStakeSearchTime, nMaxStakeSearchInterval);
 
         // (txid, nout) => (kernel, (tx.nTime, nAmount))
+        unsigned int nIntervalSeconds = interval.first - interval.second;
+
         for(MidstateMap::const_iterator input = inputsMap.begin(); input != inputsMap.end(); input++)
         {
             unsigned char *kernel = (unsigned char *) &input->second.first[0];
+
+            // Stake mining statistics: one kernel hash per second of the search
+            // window per input, carrying this input's coin-day weight
+            if (pwallet)
+            {
+                pwallet->AddStakeStats(nIntervalSeconds,
+                                       ((double)input->second.second.second / COIN)
+                                          * ((double)(nSearchTime - input->second.second.first) / 86400.0)
+                                          * ((double)nIntervalSeconds / 86400.0));
+            }
 
             // scan(State, Bits, Time, Amount, ...)
             if (ScanKernelBackward(kernel, nBits, input->second.second.first, input->second.second.second, interval, solution))
@@ -754,7 +766,7 @@ void ThreadStakeMiner(void* parg)
                 }
             }
 
-            if (ScanMap(inputsMap, nBits, LuckyInput, solution))
+            if (ScanMap(inputsMap, nBits, LuckyInput, solution, pwallet))
             {
                 SetThreadPriority(THREAD_PRIORITY_NORMAL);
 

@@ -72,10 +72,23 @@ private:
     int64_t nLastResend;
 
     // stake mining statistics
+    // nKernelsTried: number of kernel hashes scanned since wallet creation
+    // dCoinDaysTried: accumulated coin-day weight engaged in the search
+    //                 (sum over every scanned hash of amount*age_days; per day of uptime
+    //                  an input of weight W coin-days adds approximately W to this counter)
     uint64_t nKernelsTried;
-    uint64_t nCoinDaysTried;
+    double dCoinDaysTried;
 
 public:
+    // Stake mining statistics (updated by the stake miner thread)
+    void AddStakeStats(uint64_t nKernels, double dCoinDays)
+    {
+        nKernelsTried += nKernels;
+        dCoinDaysTried += dCoinDays;
+    }
+    uint64_t GetStakeKernelsTried() const { return nKernelsTried; }
+    double GetStakeCoinDaysTried() const { return dCoinDaysTried; }
+
     mutable CCriticalSection cs_wallet;
 
     bool fFileBacked;
