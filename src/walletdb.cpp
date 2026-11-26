@@ -1001,7 +1001,7 @@ bool DumpWallet(CWallet* pwallet, const std::string& strDest)
        return false;
 
     // produce output
-    file << strprintf("# Wallet dump created by NovaCoin %s (%s)\n", CLIENT_BUILD.c_str(), CLIENT_DATE.c_str());
+    file << strprintf("# Wallet dump created by 42-coin %s (%s)\n", CLIENT_BUILD.c_str(), CLIENT_DATE.c_str());
     file << strprintf("# * Created on %s\n", EncodeDumpTime(GetTime()).c_str());
     file << strprintf("# * Best block at time of backup was %i (%s),\n", nBestHeight, hashBestChain.ToString().c_str());
     file << strprintf("#   mined on %s\n", EncodeDumpTime(pindexBest->nTime).c_str());
@@ -1025,6 +1025,29 @@ bool DumpWallet(CWallet* pwallet, const std::string& strDest)
                 file << strprintf(" %s label=%s # view=%s addr=%s\n", strTime.c_str(), EncodeDumpString(pwallet->mapAddressBook[addr]).c_str(), keyView.ToString().c_str(), strAddr.c_str());
             else
                 file << strprintf(" %s # view=%s addr=%s\n", strTime.c_str(), keyView.ToString().c_str(), strAddr.c_str());
+        }
+        else if (addr.IsFalconScript())
+        {
+            // Strict falcon script address: dump the underlying falcon-512 key.
+            // The redeem script is deterministic from the key, so the WIF alone
+            // is sufficient to reproduce the address on restore.
+            CScriptID scriptID;
+            if (!addr.GetFalconScriptID(scriptID))
+                continue;
+            CScript subscript;
+            if (!pwallet->GetCScript(scriptID, subscript))
+                continue;
+            CFalconKeyID falconKeyID;
+            if (!IsStrictFalconScript(subscript, falconKeyID))
+                continue;
+            CFalconKey keyFalcon;
+            if (!pwallet->GetFalconKey(falconKeyID, keyFalcon))
+                continue;
+            file << CBitcoinFalconKey(keyFalcon).ToString();
+            if (pwallet->mapAddressBook.count(addr))
+                file << strprintf(" %s label=%s # addr=%s\n", strTime.c_str(), EncodeDumpString(pwallet->mapAddressBook[addr]).c_str(), strAddr.c_str());
+            else
+                file << strprintf(" %s # addr=%s\n", strTime.c_str(), strAddr.c_str());
         }
         else {
             // Pubkey hash address
@@ -1098,7 +1121,33 @@ bool ImportWallet(CWallet *pwallet, const std::string& strLocation)
 
        CBitcoinAddress addr;
        CBitcoinSecret vchSecret;
-       if (vchSecret.SetString(vstr[0])) {
+
+       CBitcoinFalconKey falconKey;
+       if (falconKey.SetString(vstr[0])) {
+           // Falcon-512 private key (long WIF, ~3 KB, no whitespace in the token)
+           CFalconKey keyFalcon;
+           if (!falconKey.GetKey(keyFalcon) || !keyFalcon.IsValid())
+               continue;
+
+           CScript scriptRedeem = BuildFalconRedeemScript(keyFalcon.GetID());
+           addr.SetFalconScriptID(scriptRedeem.GetID());
+
+           if (pwallet->HaveFalconKey(keyFalcon.GetID())) {
+               printf("Skipping import of %s (key already present)\n", addr.ToString().c_str());
+               continue;
+           }
+
+           printf("Importing %s...\n", addr.ToString().c_str());
+           if (!pwallet->AddCScript(scriptRedeem)) {
+               fGood = false;
+               continue;
+           }
+           if (!pwallet->AddFalconKey(keyFalcon, addr)) {
+               fGood = false;
+               continue;
+           }
+           pwallet->MarkDirty();
+       } else if (vchSecret.SetString(vstr[0])) {
            // Simple private key
 
            bool fCompressed;

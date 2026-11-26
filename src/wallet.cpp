@@ -218,6 +218,10 @@ bool CWallet::AddFalconKey(const CFalconKey& key, const CBitcoinAddress& address
         return error("CWallet::AddFalconKey() : AddFalconKey failed");
     if (!fFileBacked)
         return true;
+    // record the birth time so the address shows up in GetAddresses()/
+    // dumpwallet with its real creation time (same as EC keys in AddKey)
+    if (mapKeyMetadata.find(address) == mapKeyMetadata.end())
+        mapKeyMetadata[address] = CKeyMetadata(GetAdjustedTime());
     if (!CWalletDB(strWalletFile).WriteFalconKey(key))
         return error("CWallet::AddFalconKey() : WriteFalconKey failed");
     SetAddressBookName(address, "");
@@ -3512,6 +3516,24 @@ void CWallet::GetAddresses(std::map<CBitcoinAddress, int64_t> &mapAddresses) con
     // get birth times for keys with metadata
     for (std::map<CBitcoinAddress, CKeyMetadata>::const_iterator it = mapKeyMetadata.begin(); it != mapKeyMetadata.end(); it++) {
         mapAddresses[it->first] = it->second.nCreateTime ? it->second.nCreateTime : 0;
+    }
+
+    // Falcon-512 keys have no mapKeyMetadata entry unless one was imported
+    // with a timestamp, so seed them here with birth time 0 (= unknown); the
+    // transaction loop below refines it to the first falcon output's nTime.
+    // Without this pass the addresses never enter mapAddresses (the tx loop
+    // only refreshes existing entries) and dumpwallet would omit every
+    // falcon address.
+    {
+        std::set<CFalconKeyID> setFalconKeys;
+        GetFalconKeys(setFalconKeys);
+        for (std::set<CFalconKeyID>::const_iterator it = setFalconKeys.begin(); it != setFalconKeys.end(); ++it) {
+            CScript scriptRedeem = BuildFalconRedeemScript(*it);
+            CBitcoinAddress addrFalcon;
+            addrFalcon.SetFalconScriptID(scriptRedeem.GetID());
+            if (mapAddresses.find(addrFalcon) == mapAddresses.end())
+                mapAddresses[addrFalcon] = 0;
+        }
     }
 
     for (std::map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); it++) {
