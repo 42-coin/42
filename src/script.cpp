@@ -1904,6 +1904,20 @@ bool ExtractAddress(const CKeyStore &keystore, const CScript& scriptPubKey, CBit
         }
         return true;
     }
+    else if (whichType == TX_FALCON)
+    {
+        // Bare strict falcon output (e.g. falcon coinstake kernels): the
+        // script itself is the strict template, byte-identical to the
+        // redeem script built from the key, so its Hash160 is the falcon
+        // address script id.
+        CFalconKeyID falconKeyID((uint256(vSolutions[0])));
+        if (!keystore.HaveFalconKey(falconKeyID))
+            return false;
+        CBitcoinAddress falconAddress;
+        falconAddress.SetFalconScriptID(scriptPubKey.GetID());
+        addressRet = falconAddress;
+        return true;
+    }
     // Multisig txns have more than one address...
     return false;
 }

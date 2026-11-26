@@ -1017,8 +1017,16 @@ bool CWallet::IsChange(const CTxOut& txout) const
     // which output, if any, was change).
     if (::IsMine(*this, txout.scriptPubKey))
     {
-        CTxDestination address;
-        if (!ExtractDestination(txout.scriptPubKey, address))
+        // Keystore-aware extraction: for a P2SH output whose redeem script
+        // is our strict falcon script it yields the falcon ("f") address -
+        // the one mapAddressBook actually tracks. The generic
+        // ExtractDestination only knows the three CTxDestination variants
+        // and returns the bare P2SH CScriptID for falcon spends, which never
+        // matches the falcon address book key, so every falcon output was
+        // classified as change and Coin Control grouped coins of imported
+        // falcon addresses under unrelated wallet addresses.
+        CBitcoinAddress address;
+        if (!ExtractAddress(*this, txout.scriptPubKey, address))
             return true;
 
         LOCK(cs_wallet);
