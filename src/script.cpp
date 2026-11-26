@@ -1996,9 +1996,107 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Canonical falcon scriptSig (soft-fork tightening under SCRIPT_VERIFY_FALCON)
+//
+// The strict falcon branch reassembles the signature and the public key by
+// concatenating chunk pairs from the stack (sig = stacktop(-4)||stacktop(-5),
+// pubkey = stacktop(-2)||stacktop(-3)), so the same data can be pushed in many
+// different byte layouts: chunk boundaries can be shifted and pushes can be
+// re-encoded with fatter opcodes. Every layout yields a different scriptSig
+// and therefore a different txid - third parties could rewrite transactions
+// in flight. We require the single layout the wallet produces via
+// SplitForScript() + the minimally encoded CScript pushes:
+//   - minimal opcode per pushed element (OP_0 / direct push / PUSHDATA1/2);
+//   - in each (tail, head) pair the head is MAX_SCRIPT_ELEMENT_SIZE bytes
+//     unless the data fit into one chunk (then the tail is empty);
+//   - exactly the literal set [sig2, sig1, key2, key1] for bare strict falcon
+//     outputs, plus the redeem-script push for P2SH spends.
+// This is evaluated before EvalScript runs; it cannot turn a failing script
+// into a passing one, only reject re-encodings of valid falcon spends.
+// ---------------------------------------------------------------------------
+
+bool IsCanonicalFalconPushOpcode(opcodetype opcode, const valtype& vchData)
+{
+    // only data-push opcodes are allowed; the small-integer opcodes (OP_1..OP_16)
+    // and OP_PUSHDATA4 are never canonical encodings of script data
+    if (opcode == OP_0)
+        return vchData.empty();
+    if (opcode >= 1 && opcode <= 75)
+        return vchData.size() == (unsigned int)opcode;
+    if (opcode == OP_PUSHDATA1)
+        return vchData.size() >= 76 && vchData.size() <= 255;
+    if (opcode == OP_PUSHDATA2)
+        return vchData.size() >= 256 && vchData.size() <= MAX_SCRIPT_ELEMENT_SIZE;
+    return false;
+}
+
+// CFalconKey::SplitForScript() always produces (min(len, 520), remainder)
+static bool IsCanonicalFalconChunkPair(const valtype& vchTail, const valtype& vchHead)
+{
+    if (vchTail.empty())
+        return !vchHead.empty() && vchHead.size() <= MAX_SCRIPT_ELEMENT_SIZE;
+    return vchHead.size() == MAX_SCRIPT_ELEMENT_SIZE && vchTail.size() <= MAX_SCRIPT_ELEMENT_SIZE;
+}
+
+bool IsCanonicalFalconScriptSig(const CScript& scriptSig, const CScript& scriptPubKey)
+{
+    // Walk the pushes; any non-push opcode means this cannot be one of our
+    // canonical falcon spends (the strict branch needs bare literals) and the
+    // normal evaluation rules decide.
+    std::vector<valtype> vchChunks;
+    {
+        CScript::const_iterator pc = scriptSig.begin();
+        opcodetype opcode;
+        valtype vch;
+        while (pc < scriptSig.end())
+        {
+            if (!scriptSig.GetOp(pc, opcode, vch))
+                return false; // malformed script - EvalScript would reject it too
+            if (opcode <= OP_PUSHDATA4)
+            {
+                // every pushed element of our spend must be minimally encoded;
+                // a fat opcode (PUSHDATA1 on a small item, PUSHDATA4, a fat
+                // PUSHDATA2, ...) is exactly the re-encoding this rule exists
+                // to forbid
+                if (!IsCanonicalFalconPushOpcode(opcode, vch))
+                    return false;
+                vchChunks.push_back(vch);
+            }
+            else
+                return true; // non-push opcode: not a canonical-shaped spend; eval decides
+        }
+    }
+
+    CFalconKeyID falconKeyID;
+    if (scriptPubKey.IsPayToScriptHash())
+    {
+        if (vchChunks.empty())
+            return true; // P2SH with empty scriptSig fails elsewhere
+        CScript redeemScript(vchChunks.back().begin(), vchChunks.back().end());
+        if (!IsStrictFalconScript(redeemScript, falconKeyID))
+            return true; // not a falcon spend - no canonicality constraint
+        // [sig2, sig1, key2, key1, redeem]
+        if (vchChunks.size() != 5)
+            return false;
+        return IsCanonicalFalconChunkPair(vchChunks[0], vchChunks[1])
+            && IsCanonicalFalconChunkPair(vchChunks[2], vchChunks[3]);
+    }
+
+    if (!IsStrictFalconScript(scriptPubKey, falconKeyID))
+        return true; // bare output of another kind
+    // bare strict falcon: [sig2, sig1, key2, key1]
+    if (vchChunks.size() != 4)
+        return false;
+    return IsCanonicalFalconChunkPair(vchChunks[0], vchChunks[1])
+        && IsCanonicalFalconChunkPair(vchChunks[2], vchChunks[3]);
+}
+
 bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CTransaction& txTo, unsigned int nIn,
                   unsigned int flags, int nHashType)
 {
+    if ((flags & SCRIPT_VERIFY_FALCON) && !IsCanonicalFalconScriptSig(scriptSig, scriptPubKey))
+        return false;
     std::vector<std::vector<unsigned char> > stack, stackCopy;
     if (!EvalScript(stack, scriptSig, txTo, nIn, flags, nHashType))
         return false;

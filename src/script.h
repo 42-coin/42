@@ -653,6 +653,13 @@ bool SignSignature(const CKeyStore& keystore, const CScript& fromPubKey, CTransa
 bool SignSignature(const CKeyStore& keystore, const CTransaction& txFrom, CTransaction& txTo, unsigned int nIn, int nHashType=SIGHASH_ALL);
 bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CTransaction& txTo, unsigned int nIn, unsigned int flags, int nHashType);
 
+//! Canonical falcon scriptSig rules (SCRIPT_VERIFY_FALCON): minimal push
+//! opcodes and the exact SplitForScript chunk layout, so a strict falcon
+//! spend has exactly one valid scriptSig serialization and its txid cannot
+//! be rewritten by third parties.
+bool IsCanonicalFalconPushOpcode(opcodetype opcode, const valtype& vchData);
+bool IsCanonicalFalconScriptSig(const CScript& scriptSig, const CScript& scriptPubKey);
+
 // Given two sets of signatures for scriptPubKey, possibly with OP_0 placeholders,
 // combine them intelligently and return the result.
 CScript CombineSignatures(const CScript& scriptPubKey, const CTransaction& txTo, unsigned int nIn, const CScript& scriptSig1, const CScript& scriptSig2);
