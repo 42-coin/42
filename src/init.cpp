@@ -17,7 +17,7 @@
 #include "checkpoints.h"
 
 #include <boost/filesystem/fstream.hpp>
-#include <boost/filesystem/convenience.hpp>
+#include <boost/filesystem/operations.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <openssl/crypto.h>
@@ -502,9 +502,10 @@ bool AppInit2()
 
     std::string strDataDir = GetDataDir().string();
     strWalletFileName = GetArg("-wallet", "wallet.dat");
+    boost::filesystem::path pathWalletFile(strWalletFileName);
 
     // strWalletFileName must be a plain filename without a directory
-    if (strWalletFileName != boost::filesystem::basename(strWalletFileName) + boost::filesystem::extension(strWalletFileName))
+    if (strWalletFileName != pathWalletFile.stem().string() + pathWalletFile.extension().string())
         return InitError(strprintf(_("Wallet %s resides outside data directory %s."), strWalletFileName.c_str(), strDataDir.c_str()));
 
     // Make sure only a single Bitcoin process is using the data directory.

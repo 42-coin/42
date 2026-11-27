@@ -8,7 +8,8 @@
 #include "base58.h"
 
 #include <boost/version.hpp>
-#include <boost/filesystem.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/exception.hpp>
 
 #include <iterator>
 
@@ -957,7 +958,11 @@ bool BackupWallet(const CWallet& wallet, const std::string& strDest)
                     pathDest /= wallet.strWalletFile;
 
                 try {
-#if BOOST_VERSION >= 104000
+#if BOOST_VERSION >= 107400
+                    // Boost 1.74.0 and up implements std++17 like "copy_options", and this
+                    // is the only remaining enum after 1.85.0
+                    boost::filesystem::copy_file(pathSrc, pathDest, boost::filesystem::copy_options::overwrite_existing);
+#elif BOOST_VERSION >= 104000
                     boost::filesystem::copy_file(pathSrc, pathDest, boost::filesystem::copy_option::overwrite_if_exists);
 #else
                     boost::filesystem::copy_file(pathSrc, pathDest);
