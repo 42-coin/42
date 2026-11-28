@@ -13,12 +13,12 @@ static const unsigned int STRICT_FALCON_SWITCH_TIME_TESTNET = 1767225600; // Thu
 static const unsigned int FALCON_ZONE_SWITCH_TIME = 1798761600;         // Friday, 01 Jan 2027 00:00:00 UTC
 static const unsigned int FALCON_ZONE_SWITCH_TIME_TESTNET = 1767225600; // Thursday, 01 Jan 2026 00:00:00 UTC
 
-// From this common wall-clock date the transaction fees are burned in proof-of-work
+// From this wall-clock date the transaction fees are burned in proof-of-work
 // blocks exactly like they always were in proof-of-stake blocks: the coinbase pays
-// the subsidy only and the fees leave the money supply. The same date applies to
-// both networks.
+// the subsidy only and the fees leave the money supply. Fee burning starts with
+// the falcon zone, hence the testnet date matches FALCON_ZONE_SWITCH_TIME_TESTNET.
 static const unsigned int FEE_BURN_SWITCH_TIME = 1798761600;         // Friday, 01 Jan 2027 00:00:00 UTC
-static const unsigned int FEE_BURN_SWITCH_TIME_TESTNET = 1798761600; // Friday, 01 Jan 2027 00:00:00 UTC
+static const unsigned int FEE_BURN_SWITCH_TIME_TESTNET = 1767225600; // Thursday, 01 Jan 2026 00:00:00 UTC
 // Threshold for nLockTime: below this value it is interpreted as block number, otherwise as UNIX timestamp.
 static const unsigned int LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
 #endif
