@@ -1,5 +1,5 @@
-Copyright (c) 2016-2025 42 Developers
-Copyright (c) 2013-2024 NovaCoin Developers
+Copyright (c) 2016-2027 42-coin Developers
+Copyright (c) 2013-2026 NovaCoin Developers
 Copyright (c) 2014-2024 The EmerCoin Developers
 Copyright (c) 2011-2014 PPCoin Developers
 Copyright (c) 2009-2021 Bitcoin Developers
@@ -12,7 +12,7 @@ cryptographic software written by Eric Young (eay@cryptsoft.com).
 
 Intro
 -----
-42 is a free open source project derived from Bitcoin, with
+42-coin is a free open source project derived from Bitcoin, with
 the goal of providing a long-term energy-efficient scrypt-based crypto-currency.
 Built on the foundation of Bitcoin, NovaCoin and PPCoin, innovations such as proof-of-stake and scrypt
 help further advance the field of crypto-currency.

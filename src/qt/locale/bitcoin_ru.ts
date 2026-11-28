@@ -6,8 +6,8 @@
     <name>AboutDialog</name>
     <message>
         <location filename="../forms/aboutdialog.ui" line="14"/>
-        <source>About 42</source>
-        <translation>О 42</translation>
+        <source>About 42-coin</source>
+        <translation>О 42-coin</translation>
     </message>
     <message>
         <location filename="../forms/aboutdialog.ui" line="56"/>
@@ -20,14 +20,14 @@
 Copyright © 2011-2014 The PPCoin Developers
 Copyright © 2014 The Peerunity Developers
 Copyright © 2014-2024 The EmerCoin Developers
-Copyright © 2012-2024 The NovaCoin developers
-Copyright © 2016-2025 The 42 developers</source>
+Copyright © 2012-2026 The NovaCoin developers
+Copyright © 2016-2027 The 42-coin developers</source>
         <translation>Все права защищены © 2009-2021 Разработчики Bitcoin
 Все права защищены © 2011-2014 Разработчики PPCoin
 Все права защищены © 2014 Разработчики Peerunity
 Все права защищены © 2014-2024 Разработчики EmerCoin
-Все права защищены © 2012-2024 Разработчики NovaCoin
-Все права защищены © 2016-2025 Разработчики 42</translation>
+Все права защищены © 2012-2026 Разработчики NovaCoin
+Все права защищены © 2016-2027 Разработчики 42-coin</translation>
     </message>
     <message>
         <location filename="../forms/aboutdialog.ui" line="114"/>
