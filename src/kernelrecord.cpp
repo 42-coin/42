@@ -115,10 +115,20 @@ double KernelRecord::getProbToMintStake(double difficulty, int timeOffset) const
     //return target * coinAge / pow(static_cast<double>(2), 256);
     bool fStakeWeightV2 = IsStakeWeightV2(GetAdjustedTime() + timeOffset);
     int64_t nMinAge = fStakeWeightV2 ? nStakeMinAgeV2 : nStakeMinAge;
-    double dScale = fStakeWeightV2 ? (double)(nOneDay / nOneHour) : 1.0; // coin-hour weight owns the coin-day target 24 times more often
     int64_t Weight = (min((GetAdjustedTime() - nTime) + timeOffset, (int64_t)(nMinAge+nStakeMaxAge)) - nMinAge);
-    uint64_t coinAge = max(nValue * Weight / (COIN * nOneDay), (int64_t)0);
-    return coinAge / (pow(static_cast<double>(2),32) * difficulty) * dScale;
+    // Probability per second, computed exactly like the consensus target of
+    // CheckStakeKernelHash(): the kernel weight is value*age in coin-hours
+    // (v2) or coin-days (v1), and a kernel hits when
+    // hash < weight * nBitsTarget / (2^256 * weightScale). With the standard
+    // difficulty definition (target = 2^224 / difficulty) that folds into
+    //     P(second) = coinAge / (2^32 * difficulty).
+    // This must stay in floating point: the old integer division at coin-day
+    // granularity zeroed out fractional stakes - under v2 (min age 1 hour,
+    // fractional coin ages) any coin below a full coin-day of weight was
+    // displayed as 0% although consensus gives it real weight.
+    int64_t nWeightUnit = fStakeWeightV2 ? nOneHour : nOneDay;
+    double coinAge = (double)nValue * Weight / ((double)COIN * nWeightUnit);
+    return coinAge / (pow(static_cast<double>(2), 32) * difficulty);
 }
 
 double KernelRecord::getProbToMintWithinNMinutes(double difficulty, int minutes)
