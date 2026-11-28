@@ -93,7 +93,7 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
     optionsDialog(0)
 {
     resize(850, 550);
-    setWindowTitle(tr("42") + " - " + tr("Wallet"));
+    setWindowTitle(tr("42-coin") + " - " + tr("Wallet"));
 #ifndef Q_OS_MAC
     qApp->setWindowIcon(QIcon(":icons/bitcoin"));
     setWindowIcon(QIcon(":icons/bitcoin"));
@@ -304,7 +304,7 @@ void BitcoinGUI::createActions()
     quitAction->setStatusTip(tr("Quit application"));
     quitAction->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_Q));
     quitAction->setMenuRole(QAction::QuitRole);
-    aboutAction = new QAction(QIcon(":/icons/bitcoin"), tr("&About 42"), this);
+    aboutAction = new QAction(QIcon(":/icons/bitcoin"), tr("&About 42-coin"), this);
     aboutAction->setStatusTip(tr("Show information about 42"));
     aboutAction->setMenuRole(QAction::AboutRole);
 #if QT_VERSION < 0x050000
@@ -741,7 +741,7 @@ void BitcoinGUI::updateMining()
 
 void BitcoinGUI::message(const QString &title, const QString &message, unsigned int style, const QString &detail)
 {
-    QString strTitle = tr("42") + " - ";
+    QString strTitle = tr("42-coin") + " - ";
     // Default to information icon
     int nMBoxIcon = QMessageBox::Information;
     int nNotifyIcon = Notificator::Information;
