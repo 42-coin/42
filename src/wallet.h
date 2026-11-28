@@ -166,7 +166,7 @@ public:
     bool LoadFalconKey(const CFalconKey& key) { return CCryptoKeyStore::AddFalconKey(key); }
     bool LoadCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret);
     bool AddCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret);
-    bool GetFalconChangeScript(CScript& scriptChange);
+    bool GetFalconChangeScript(CScript& scriptChange, bool fFresh = false);
     bool IsFalconCoin(const CTxOut& txout) const;
     // Diagnostics: 0 = falcon coin, 1 = not P2SH, 2 = redeem script not in wallet,
     // 3 = redeem script is not a strict falcon script, 4 = falcon key missing

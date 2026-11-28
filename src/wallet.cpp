@@ -219,12 +219,15 @@ bool CWallet::AddFalconKey(const CFalconKey& key, const CBitcoinAddress& address
     if (!fFileBacked)
         return true;
     // record the birth time so the address shows up in GetAddresses()/
-    // dumpwallet with its real creation time (same as EC keys in AddKey)
+    // dumpwallet with its real creation time (same as EC keys in AddKey).
+    // No SetAddressBookName here: callers that hand out a receiving address
+    // (getnewfalconaddress, address book page, importfalconkey) label it
+    // themselves, and change keys must stay out of the address book so
+    // IsChange() can recognise falcon change outputs (same as EC AddKey).
     if (mapKeyMetadata.find(address) == mapKeyMetadata.end())
         mapKeyMetadata[address] = CKeyMetadata(GetAdjustedTime());
     if (!CWalletDB(strWalletFile).WriteFalconKey(key))
         return error("CWallet::AddFalconKey() : WriteFalconKey failed");
-    SetAddressBookName(address, "");
     return true;
 }
 
@@ -264,14 +267,15 @@ bool CWallet::AddCryptedFalconKey(const CFalconKeyID& keyID, const std::vector<u
     return false;
 }
 
-bool CWallet::GetFalconChangeScript(CScript& scriptChange)
+bool CWallet::GetFalconChangeScript(CScript& scriptChange, bool fFresh)
 {
-    std::set<CFalconKeyID> setFalconKeys;
-    GetFalconKeys(setFalconKeys);
-
     CFalconKeyID keyID;
-    if (setFalconKeys.empty())
+    if (fFresh)
     {
+        // dedicated per-transaction change key (like the EC reserve key
+        // pool): it never enters the address book, so its outputs are
+        // correctly classified as change and coins do not pile up on a
+        // single reused address.
         CFalconKey keyNew;
         CBitcoinAddress addressNew;
         if (!GenerateNewFalconKey(keyNew, addressNew))
@@ -279,7 +283,21 @@ bool CWallet::GetFalconChangeScript(CScript& scriptChange)
         keyID = keyNew.GetID();
     }
     else
-        keyID = *setFalconKeys.begin();
+    {
+        std::set<CFalconKeyID> setFalconKeys;
+        GetFalconKeys(setFalconKeys);
+
+        if (setFalconKeys.empty())
+        {
+            CFalconKey keyNew;
+            CBitcoinAddress addressNew;
+            if (!GenerateNewFalconKey(keyNew, addressNew))
+                return false;
+            keyID = keyNew.GetID();
+        }
+        else
+            keyID = *setFalconKeys.begin();
+    }
 
     CScript scriptRedeem = BuildFalconRedeemScript(keyID);
     if (!HaveCScript(scriptRedeem.GetID()))
@@ -2346,7 +2364,10 @@ bool CWallet::CreateTransaction(const std::vector<std::pair<CScript, int64_t> >&
                                 printf("CreateTransaction() : coin control change destination is not a falcon address, using own falcon change\n");
                             if (!fFalconChangeReady)
                             {
-                                if (!GetFalconChangeScript(scriptFalconChange))
+                                // fresh dedicated change key per transaction
+                                // (never in the address book -> correctly
+                                // identified as change, no address reuse)
+                                if (!GetFalconChangeScript(scriptFalconChange, true))
                                     return error("CWallet::CreateTransaction() : unable to get a falcon change address");
                                 fFalconChangeReady = true;
                             }
