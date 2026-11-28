@@ -614,7 +614,7 @@ void MultisigDialog::updateAmounts()
             inputsAmount += entry->getAmount();
     }
     QString inputsAmountStr;
-    inputsAmountStr.sprintf("%.6f", (double) inputsAmount / COIN);
+    inputsAmountStr.sprintf("%.8f", (double) inputsAmount / COIN);
     ui->inputsAmount->setText(inputsAmountStr);
 
     // Update outputs amount
@@ -626,13 +626,13 @@ void MultisigDialog::updateAmounts()
             outputsAmount += entry->getValue().amount;
     }
     QString outputsAmountStr;
-    outputsAmountStr.sprintf("%.6f", (double) outputsAmount / COIN);
+    outputsAmountStr.sprintf("%.8f", (double) outputsAmount / COIN);
     ui->outputsAmount->setText(outputsAmountStr);
 
     // Update Fee amount
     int64_t fee = inputsAmount - outputsAmount;
     QString feeStr;
-    feeStr.sprintf("%.6f", (double) fee / COIN);
+    feeStr.sprintf("%.8f", (double) fee / COIN);
     ui->fee->setText(feeStr);
 }
 
